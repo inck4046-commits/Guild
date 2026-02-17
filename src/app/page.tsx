@@ -6,7 +6,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 
 // ============================================================================
-// [1] 데이터 및 상수 (압축형 - 기능 100% 동일)
+// [1] 데이터 및 상수
 // ============================================================================
 const DRAGON_TYPES = ["체", "공", "방", "체공", "체방", "공방", "(진각)체", "(진각)공", "(진각)방", "(진각)체공", "(진각)체방", "(진각)공방"];
 const GRADES = ["7.0", "8.0", "9.0"];
@@ -36,91 +36,107 @@ const POTION_KEYS = ["기본(크/회/자)", ...Object.keys(POTION_DB).filter(k =
 // ============================================================================
 // [2] 헬퍼 함수
 // ============================================================================
-function safeFmt(val) { return (val || 0).toLocaleString(); }
+function safeFmt(val) {
+    if (val === null || val === undefined || isNaN(val)) return "0";
+    return Number(val).toLocaleString();
+}
 function normalizeNerf(n) { return (!n || n === "No Nerf") ? "너프 없음" : n; }
-function normalizeType(t) { return (t || "체").replace("HP", "체").replace("ATK", "공").replace("DEF", "방").replace("H/A", "체공").replace("H/D", "체방").replace("A/D", "공방"); }
-function getBuffWeight(buffName) { return (buffName?.includes("40%") || buffName?.includes("+")) ? 2 : (buffName === "0벞" ? 0 : 1); }
-function formatGemString(gems) { return gems?.map(g => `${g.stat}${g.val}`).join(" ") || "젬 없음"; }
-
+function normalizeType(t) {
+    if (!t) return "체";
+    return t.replace("HP", "체").replace("ATK", "공").replace("DEF", "방")
+        .replace("H/A", "체공").replace("H/D", "체방").replace("A/D", "공방");
+}
+function getBuffWeight(buffName) {
+    if (!buffName || buffName === '0벞') return 0;
+    if (buffName.includes("40%") || buffName.includes("+")) return 2;
+    return 1;
+}
+function formatGemString(gems, lang = 'ko') {
+    if (!gems || !Array.isArray(gems) || gems.length === 0) return lang === 'en' ? "No Gems" : "젬 없음";
+    const sorted = [...gems].sort((a, b) => {
+        const typeOrder = { "체": 1, "공": 2, "방": 3 };
+        if (typeOrder[a.stat] !== typeOrder[b.stat]) return typeOrder[a.stat] - typeOrder[b.stat];
+        return b.val - a.val;
+    });
+    return sorted.map(g => {
+        let s = g.stat;
+        if (lang === 'en') s = s === '체' ? 'HP' : s === '공' ? 'ATK' : 'DEF';
+        return `${s} ${g.val}`;
+    }).join(" ");
+}
 function convertSpiritToStats(inputs) {
     const pct = { hp: 0, atk: 0, def: 0 }; const flat = { hp: 0, atk: 0, def: 0 }; const sub = { hp: 0, atk: 0, def: 0 };
-    if (!inputs) return { pct, flat, sub };
+    if (!inputs || !Array.isArray(inputs)) return { pct, flat, sub };
+    const SLOT_MAP = { "체력": 0, "공격력": 1, "방어력": 2 };
     inputs.forEach((row, i) => {
         if (!row || !row.stat) return;
-        const k = row.stat === "체력" ? 0 : row.stat === "공격력" ? 1 : 2;
-        const key = k === 0 ? 'hp' : k === 1 ? 'atk' : 'def';
-        if (i < 4) {
-            if (row.type === '+') flat[key] += (SPIRIT_FLAT_TBL[i+1] ? SPIRIT_FLAT_TBL[i+1][k] : 0);
-            else pct[key] += (SPIRIT_PCT_TBL[i+1] ? SPIRIT_PCT_TBL[i+1][k] : 0);
-        } else {
-            if (row.stat.includes("체력")) sub.hp += 40; else sub[key] += 10;
+        let statName = row.stat;
+        if (i === 4) {
+            if (statName.includes("체력")) statName = "체력";
+            else if (statName.includes("공격력")) statName = "공격력";
+            else if (statName.includes("방어력")) statName = "방어력";
+        }
+        const k = SLOT_MAP[statName];
+        if (k !== undefined) {
+            const statKey = k === 0 ? 'hp' : k === 1 ? 'atk' : 'def';
+            if (i < 4) {
+                if (row.type === '+') flat[statKey] += (SPIRIT_FLAT_TBL[i+1] ? SPIRIT_FLAT_TBL[i+1][k] : 0);
+                else pct[statKey] += (SPIRIT_PCT_TBL[i+1] ? SPIRIT_PCT_TBL[i+1][k] : 0);
+            } else {
+                if (statName === "체력") sub.hp += 40;
+                else if (statName === "공격력") sub.atk += 10;
+                else if (statName === "방어력") sub.def += 10;
+            }
         }
     });
     return { pct, flat, sub };
 }
-
-function calculateStats(config, gems, activeEnchantType = null) {
-    try {
-        const typeKey = normalizeType(config.typ);
-        const baseKey = typeKey.includes("(진각)") ? typeKey : typeKey.replace("(진각)", "");
-        let base = { ...(BASE_STATS[baseKey] || { hp: 1252, atk: 176, def: 176 }) };
-        const gradeVal = parseFloat(config.grade || "9.0");
-        const diff = Math.max(0, gradeVal - 7.0);
-        const bonusKey = baseKey.replace("(진각)","");
-        base.hp += Math.round((GRADE_BONUS[bonusKey]?.hp || 0) * diff);
-        base.atk += Math.round((GRADE_BONUS[bonusKey]?.atk || 0) * diff);
-        base.def += Math.round((GRADE_BONUS[bonusKey]?.def || 0) * diff);
-
-        const awk = AWAKENING_STATS[typeKey] || { hp: 0, atk: 0, def: 0 };
-        const gemSum = { hp: 0, atk: 0, def: 0 };
-        gems?.forEach(g => {
-            if (g.stat === '체') gemSum.hp += Number(g.val) * 4;
-            if (g.stat === '공') gemSum.atk += Number(g.val);
-            if (g.stat === '방') gemSum.def += Number(g.val);
-        });
-
-        const pot = config.potion || { hp: 24, atk: 6, def: 6 };
-        const acc = config.accPct || { hp: 0, atk: 0, def: 0 };
-        const enchantVal = 0.21;
-        const accTotal = { 
-            hp: acc.hp + (activeEnchantType === 'hp' ? enchantVal : 0),
-            atk: acc.atk + (activeEnchantType === 'atk' ? enchantVal : 0),
-            def: acc.def + (activeEnchantType === 'def' ? enchantVal : 0)
-        };
-
-        const sp = config.spiritStats || { pct: { hp: 0, atk: 0, def: 0 }, flat: { hp: 0, atk: 0, def: 0 }, sub: { hp: 0, atk: 0, def: 0 } };
-        const pd = config.pendantPct || { hp: 0, atk: 0, def: 0 };
-        const col = config.collection || { hp: 240, atk: 60, def: 60 };
-        const nerf = NERFS_DB[config.nerfKey] || { hp: 0, atk: 0, def: 0 };
-        const buff = BUFFS_DB[config.buff] || { hp: 0, atk: 0, def: 0 };
-
-        const final = { hp: 0, atk: 0, def: 0 };
-        const buffValues = { hp: 0, atk: 0, def: 0 };
-        ['hp', 'atk', 'def'].forEach(k => {
-            const v1 = base[k] + awk[k] + gemSum[k] + pot[k];
-            const v2 = Math.floor(v1 * (1 + accTotal[k]));
-            const v3 = Math.floor((v2 + sp.flat[k]) * (1 + sp.pct[k]));
-            const v4 = Math.floor(v3 * (1 + pd[k]));
-            const v5 = v4 + col[k] + sp.sub[k];
-            const bVal = Math.floor(base[k] * buff[k]);
-            buffValues[k] = bVal;
-            final[k] = v5 + bVal - Math.floor(base[k] * nerf[k]);
-        });
-        return { final, score: final.hp * final.atk * final.def, buffValues };
-    } catch (e) { return { final: { hp: 0, atk: 0, def: 0 }, score: 0, buffValues: { hp: 0, atk: 0, def: 0 } }; }
+function formatSpirit(inputs, lang = 'ko') {
+    if (!inputs || !Array.isArray(inputs) || inputs.length === 0) return "-";
+    const mains = inputs.slice(0, 4).map((i) => {
+        if (!i || !i.stat || i.stat === '없음') return '';
+        let s = i.stat[0]; if (lang === 'en') s = i.stat === '체력' ? 'H' : i.stat === '공격력' ? 'A' : 'D';
+        return `${s}${i.type || ''}`;
+    }).join(" ");
+    const sub = (inputs[4] && inputs[4].stat) ? (lang === 'en' ? (inputs[4].stat === '체력' ? 'H' : inputs[4].stat === '공격력' ? 'A' : 'D') : inputs[4].stat[0]) : "";
+    return `${mains} ${sub}`.trim();
+}
+function translateAcc(name, lang) {
+    if (lang !== 'en') return name;
+    let out = name || "";
+    out = out.replace("악보", "Nightmare Orb").replace("여보", "Dawn Orb").replace("황보", "Twilight Orb").replace("크발", "Critical Claw").replace("빛뿔공", "Light Horn (ATK)").replace("빛뿔", "Light Horn").replace("바뿔", "Wind Horn ").replace("불뿔", "Fire Horn ").replace("물뿔", "Water Horn ").replace("대뿔", "Earth Horn ");
+    out = out.replace("(체/공)", "(H/A)").replace("(공/체)", "(A/H)").replace("(체/방)", "(H/D)").replace("(방/체)", "(D/H)").replace("(방/공)", "(D/A)").replace("(공/방)", "(A/D)");
+    return out;
+}
+function calculateTar(score, denom) {
+    if (!denom) return 0;
+    const r = score / denom;
+    return r <= 1.0 ? Math.max(0, 200 * r - 100) : 100 * r;
 }
 
 class GemPool {
     constructor(gemData) {
-        this.counts = [[0,0,0,0,0,0,0], [0,0,0,0,0,0,0], [0,0,0,0,0,0,0]];
-        Object.entries(gemData || {}).forEach(([k, v]) => {
-            const [s, val] = k.split('_');
-            const sIdx = s === '체' ? 0 : s === '공' ? 1 : 2;
-            const vIdx = 40 - Number(val);
-            if (sIdx >= 0 && vIdx >= 0) this.counts[sIdx][vIdx] = Number(v);
-        });
+        this.counts = [[0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0]];
+        if (gemData) {
+            Object.entries(gemData).forEach(([key, count]) => {
+                const parts = key.split('_');
+                if (parts.length >= 2 && count > 0) {
+                    const parts2 = parts[0].trim().toUpperCase();
+                    const val = Number(parts[1]);
+                    let sIdx = -1;
+                    if (["체", "HP"].includes(parts2)) sIdx = 0;
+                    else if (["공", "ATK"].includes(parts2)) sIdx = 1;
+                    else if (["방", "DEF"].includes(parts2)) sIdx = 2;
+                    if (sIdx !== -1 && !isNaN(val)) {
+                        const vIdx = 40 - val;
+                        if (vIdx >= 0 && vIdx <= 6) this.counts[sIdx][vIdx] += Number(count);
+                    }
+                }
+            });
+        }
     }
-    clone() { const cp = new GemPool(); cp.counts = this.counts.map(a => [...a]); return cp; }
+    totalCount() { return this.counts.flat().reduce((a, b) => a + b, 0); }
+    clone() { const cp = new GemPool(); cp.counts = this.counts.map(arr => [...arr]); return cp; }
     allocate(dist) {
         const picked = []; const rollback = [];
         for (let sIdx = 0; sIdx < 3; sIdx++) {
@@ -137,123 +153,479 @@ class GemPool {
         }
         return { gems: picked, rollback };
     }
-    restore(info) { info.forEach(([s, v, c]) => this.counts[s][v] += c); }
+    restore(info) { for (const [s, v, c] of info) this.counts[s][v] += c; }
 }
 
-function createDefaultDragon(i) { return { id: i, typ: "체", grade: "9.0", buff: "HP40%", nerfKey: "너프 없음", potionName: "기본(크/회/자)", potion: { hp: 24, atk: 6, def: 6 }, use: true, boundSpirit: { use: false, input: Array(5).fill(null).map((_, ri) => ({ stat: ri < 3 ? (ri===0?"체력":ri===1?"공격력":"방어력") : "방어력", type: ri < 4 ? "%" : "+" })) } }; }
-function createDefaultSpirit(i) { return { id: i, input: Array(5).fill(null).map((_, ri) => ({ stat: ri < 3 ? (ri===0?"체력":ri===1?"공격력":"방어력") : "방어력", type: ri < 4 ? "%" : "+" })), use: true }; }
-function createDefaultPendant(i) { return { id: i, pct: { hp: 0, atk: 0, def: 0 }, use: true }; }
+function calculateStats(config, gems, activeEnchantType = null) {
+    try {
+        const typeKey = normalizeType(config.typ).replace("(진각)", "");
+        let base = { ...(BASE_STATS[typeKey] || { hp: 1252, atk: 176, def: 176 }) };
+        const gradeVal = parseFloat(config.grade || "9.0");
+        const diff = Math.max(0, gradeVal - 7.0);
+        if (diff > 0) {
+            const bonus = GRADE_BONUS[typeKey] || { hp: 0, atk: 0, def: 0 };
+            base.hp += Math.round(bonus.hp * diff); base.atk += Math.round(bonus.atk * diff); base.def += Math.round(bonus.def * diff);
+        }
+        const awk = AWAKENING_STATS[normalizeType(config.typ)] || { hp: 0, atk: 0, def: 0 };
+        const gemSum = { hp: 0, atk: 0, def: 0 };
 
-// ============================================================================
-// [3] 메인 컴포넌트
-// ============================================================================
+        if (Array.isArray(gems)) {
+            gems.forEach(g => {
+                if (g.stat === '체') gemSum.hp += Number(g.val) * 4;
+                if (g.stat === '공') gemSum.atk += Number(g.val);
+                if (g.stat === '방') gemSum.def += Number(g.val);
+            });
+        }
+
+        const potion = config.potion || { hp: 0, atk: 0, def: 0 };
+        const acc = config.accPct || { hp: 0, atk: 0, def: 0 };
+        const enchantBonus = { hp: 0, atk: 0, def: 0 };
+        if (activeEnchantType === 'hp') enchantBonus.hp = 0.21;
+        else if (activeEnchantType === 'atk') enchantBonus.atk = 0.21;
+        else if (activeEnchantType === 'def') enchantBonus.def = 0.21;
+        const accTotal = { hp: acc.hp + enchantBonus.hp, atk: acc.atk + enchantBonus.atk, def: acc.def + enchantBonus.def };
+
+        const spirit = config.spiritStats || { pct: { hp: 0, atk: 0, def: 0 }, flat: { hp: 0, atk: 0, def: 0 }, sub: { hp: 0, atk: 0, def: 0 } };
+        if (!spirit.pct) spirit.pct = { hp: 0, atk: 0, def: 0 };
+        if (!spirit.flat) spirit.flat = { hp: 0, atk: 0, def: 0 };
+        if (!spirit.sub) spirit.sub = { hp: 0, atk: 0, def: 0 };
+
+        const pendant = config.pendantPct || { hp: 0, atk: 0, def: 0 };
+        const col = config.collection || { hp: 240, atk: 60, def: 60 };
+
+        const nk = normalizeNerf(config.nerfKey || "너프 없음");
+        const nerf = NERFS_DB[nk] || { hp: 0, atk: 0, def: 0 };
+
+        const final = { hp: 0, atk: 0, def: 0 };
+        const buffValues = { hp: 0, atk: 0, def: 0 };
+        ['hp', 'atk', 'def'].forEach(k => {
+            const val1 = base[k] + awk[k] + gemSum[k] + potion[k];
+            const v2 = Math.floor(val1 * (1 + accTotal[k]));
+            const v3 = Math.floor((v2 + spirit.flat[k]) * (1 + spirit.pct[k]));
+            const pVal = Number(pendant[k]);
+            const safePendant = isNaN(pVal) ? 0 : pVal;
+            const val4 = Math.floor(val3 * (1 + safePendant));
+            const val5 = val4 + col[k] + spirit.sub[k];
+            const baseForBuff = base[k];
+            const buffVal = Math.floor(baseForBuff * (BUFFS_DB[config.buff] ? BUFFS_DB[config.buff][k] : 0));
+            buffValues[k] = buffVal;
+            final[k] = val5 + buffVal - Math.floor(base[k] * nerf[k]);
+        });
+        return { final, score: final.hp * final.atk * final.def, buffValues, activeEnchantType };
+    } catch (e) {
+        return { final: { hp: 0, atk: 0, def: 0 }, score: 0, buffValues: { hp: 0, atk: 0, def: 0 }, activeEnchantType: null };
+    }
+}
+
+async function optimizeFocusMode(dragons, gemData, inv, tarSettings, limit = 3000, lang = 'ko') {
+    let currentPool = new GemPool(gemData);
+    let currentAccs = [...inv.accessories];
+    let currentSpirits = [...inv.spirits];
+    let currentPendants = [...inv.pendants];
+
+    const emptyAcc = { hp: 0, atk: 0, def: 0, name: "없음", lv: 0, id: "none", enchants: { hp: false, atk: false, def: false } };
+    const emptySpirit = { input: [], id: "none" };
+    const emptyPendant = { pct: { hp: 0, atk: 0, def: 0 }, id: "none" };
+
+    let activeIndices = dragons.map((d, i) => d.use ? i : -1).filter(i => i !== -1);
+
+    const finalComb = [null, null, null];
+    let filledCount = 0;
+    let totalScore = 0;
+
+    while (activeIndices.length > 0 && filledCount < 3) {
+        let globalMaxScore = -1;
+        let bestDragonIdx = -1;
+        let bestDragonRes = null;
+        let bestDragonAlloc = null;
+        let bestDist = [0, 0, 0];
+
+        for (const idx of activeIndices) {
+            const dragon = dragons[idx];
+
+            let accsToTry = [...currentAccs.filter(a => a.use), emptyAcc];
+            let spiritsToUse = [...currentSpirits];
+            if (dragon.boundSpirit && dragon.boundSpirit.use) spiritsToUse.unshift(dragon.boundSpirit);
+            spiritsToUse.push(emptySpirit);
+            let pendantsToUse = [...currentPendants];
+            pendantsToUse.push(emptyPendant);
+
+            const cands = [];
+            let loopCnt = 0;
+
+            for (const acc of accsToTry) {
+                const enchs = acc.id === 'none' ? [null] : (Object.keys(acc.enchants).filter(k => acc.enchants[k]) || [null]);
+                for (const sp of spiritsToUse) {
+                    for (const pd of pendantsToUse) {
+                        for (const ench of enchs) {
+                            if (++loopCnt % 2000 === 0) await new Promise(r => setTimeout(r, 0));
+                            const spInput = sp && sp.input ? sp.input : [];
+                            const pdPct = pd && pd.pct ? pd.pct : { hp: 0, atk: 0, def: 0 };
+
+                            const stats = calculateStats({ ...dragon, accPct: acc, spiritStats: convertSpiritToStats(spInput), pendantPct: pdPct, collection: tarSettings.collection, potion: dragon.potion, nerfKey: dragon.nerfKey }, [{ stat: '체', val: 40 }, { stat: '체', val: 40 }, { stat: '공', val: 40 }, { stat: '공', val: 40 }, { stat: '방', val: 40 }], ench);
+                            cands.push({ dragon, acc, sp, pd, ench, approxScore: stats.score, spStats: convertSpiritToStats(spInput) });
+                        }
+                    }
+                }
+            }
+
+            cands.sort((a, b) => b.approxScore - a.approxScore);
+            const topCands = limit === Infinity ? cands : cands.slice(0, limit);
+            if (limit !== Infinity) {
+                const fallback = cands.find(c => c.pd.id === 'none');
+                if (fallback && !topCands.includes(fallback)) topCands.push(fallback);
+            }
+
+            for (const cand of topCands) {
+                for (const dist of GEM_DISTS) {
+                    const alloc = currentPool.allocate(dist);
+                    if (alloc) {
+                        const r = calculateStats({ ...dragon, accPct: cand.acc, spiritStats: cand.spStats, pendantPct: cand.pd.pct, collection: tarSettings.collection, potion: dragon.potion, nerfKey: dragon.nerfKey }, alloc.gems, cand.ench);
+
+                        if (r.score > globalMaxScore) {
+                            globalMaxScore = r.score;
+                            bestDragonIdx = idx;
+                            bestDragonRes = { ...r, dragonIdx: idx, dragon: dragon, acc: cand.acc, sp: cand.sp, pd: cand.pd, gems: alloc.gems, enchName: cand.ench ? (cand.ench === 'hp' ? '(체)' : cand.ench === 'atk' ? '(공)' : '(방)') : '' };
+                            bestDragonAlloc = alloc;
+                            bestDist = dist;
+                        }
+                        currentPool.restore(alloc.rollback);
+                    }
+                }
+            }
+        }
+
+        if (bestDragonRes) {
+            totalScore += globalMaxScore;
+
+            const dKey = `${normalizeType(bestDragonRes.dragon.typ)}|${bestDragonRes.dragon.buff}`;
+            const denom = TAR_DENOM[dKey] || 1000000000;
+            const safeSpInput = (bestDragonRes.sp && bestDragonRes.sp.input) ? bestDragonRes.sp.input : [];
+            const safePdPct = (bestDragonRes.pd && bestDragonRes.pd.pct) ? bestDragonRes.pd.pct : { hp: 0, atk: 0, def: 0 };
+
+            finalComb[filledCount] = {
+                ...bestDragonRes,
+                dist: bestDist,
+                tar: calculateTar(bestDragonRes.score, denom),
+                gemString: formatGemString(bestDragonRes.gems, lang),
+                accName: bestDragonRes.acc.id === 'none' ? (lang === 'en' ? 'None' : '없음') : `${translateAcc(bestDragonRes.acc.name, lang)} ${bestDragonRes.acc.lv}`,
+                spString: formatSpirit(safeSpInput, lang),
+                pndString: `${Math.round(safePdPct.hp * 100)}/${Math.round(safePdPct.atk * 100)}/${Math.round(safePdPct.def * 100)}`
+            };
+            filledCount++;
+
+            bestDragonRes.gems.forEach(g => {
+                const sIdx = g.stat === '체' ? 0 : g.stat === '공' ? 1 : 2;
+                const vIdx = 40 - g.val;
+                currentPool.counts[sIdx][vIdx]--;
+            });
+
+            if (bestDragonRes.acc.id !== 'none') currentAccs = currentAccs.filter(a => a.id !== bestDragonRes.acc.id);
+            if (bestDragonRes.sp.id !== 'none') currentSpirits = currentSpirits.filter(s => s.id !== bestDragonRes.sp.id);
+            if (bestDragonRes.pd.id !== 'none') currentPendants = currentPendants.filter(p => p.id !== bestDragonRes.pd.id);
+
+            activeIndices = activeIndices.filter(idx => idx !== bestDragonIdx);
+        } else {
+            break;
+        }
+    }
+
+    return { totalScore, combination: finalComb };
+}
+
+async function* optimizeAverageMode(dragons, gemData, inv, tarSettings, limit = 3000, lang = 'ko') {
+    const gemPoolMaster = new GemPool(gemData);
+    const activeIndices = dragons.map((d, i) => d.use ? i : -1).filter(i => i !== -1);
+
+    if (activeIndices.length === 0) {
+        yield { totalScore: 0, combination: [], warning: "No dragon selected." };
+        return;
+    }
+
+    let targetGroups = activeIndices.length > 3 ? getCombinations(activeIndices, 3) : [activeIndices];
+    let globalBestScore = -1; let globalBestSelection = null;
+
+    const availableAccs = (inv.accessories && inv.accessories.length > 0) ? inv.accessories.filter(a => a.use) : [];
+    const availableSpirits = (inv.spirits && inv.spirits.length > 0) ? inv.spirits : [];
+    const availablePendants = (inv.pendants && inv.pendants.length > 0) ? inv.pendants : [];
+
+    const emptyAcc = { hp: 0, atk: 0, def: 0, name: "없음", lv: 0, id: "none", enchants: { hp: false, atk: false, def: false } };
+    const emptySpirit = { input: [], id: "none" };
+    const emptyPendant = { pct: { hp: 0, atk: 0, def: 0 }, id: "none" };
+    const accsToTry = [...availableAccs, emptyAcc];
+
+    for (const groupIndices of targetGroups) {
+        const candidatesPerSlot = [];
+        for (const idx of groupIndices) {
+            const dragon = dragons[idx];
+            const cands = [];
+
+            let spiritsToUse = [...availableSpirits];
+            if (dragon.boundSpirit && dragon.boundSpirit.use) spiritsToUse.unshift(dragon.boundSpirit);
+            spiritsToUse.push(emptySpirit);
+
+            let pendantsToUse = [...availablePendants];
+            pendantsToUse.push(emptyPendant);
+
+            let loopCnt = 0;
+            for (const acc of accsToTry) {
+                const enchs = acc.id === 'none' ? [null] : (Object.keys(acc.enchants).filter(k => acc.enchants[k]) || [null]);
+                for (const sp of spiritsToUse) {
+                    for (const pd of pendantsToUse) {
+                        for (const ench of enchs) {
+                            if (++loopCnt % 2000 === 0) await new Promise(r => setTimeout(r, 0));
+
+                            const spInput = sp && sp.input ? sp.input : [];
+                            const pdPct = pd && pd.pct ? pd.pct : { hp: 0, atk: 0, def: 0 };
+
+                            const stats = calculateStats({ ...dragon, accPct: acc, spiritStats: convertSpiritToStats(spInput), pendantPct: pdPct, collection: tarSettings.collection, potion: dragon.potion, nerfKey: dragon.nerfKey }, [{ stat: '체', val: 40 }, { stat: '체', val: 40 }, { stat: '공', val: 40 }, { stat: '공', val: 40 }, { stat: '방', val: 40 }], ench);
+                            cands.push({ dragon, acc, sp, pd, ench, approxScore: stats.score, spStats: convertSpiritToStats(spInput) });
+                        }
+                    }
+                }
+            }
+            cands.sort((a, b) => b.approxScore - a.approxScore);
+
+            const topCands = limit === Infinity ? cands : cands.slice(0, limit);
+            if (limit !== Infinity) {
+                const fallback = cands.find(c => c.pd.id === 'none');
+                if (fallback && !topCands.includes(fallback)) topCands.push(fallback);
+            }
+            candidatesPerSlot.push(topCands);
+        }
+
+        let groupBestScore = -1; let groupBestRes = null;
+        let stack = [{ slotIdx: 0, usedIds: new Set(), currentPool: gemPoolMaster.clone(), currentRes: [] }];
+        let stackIter = 0;
+
+        let timeLimit;
+        if (limit === 1000) {
+            timeLimit = 60000;
+        } else if (limit === 3000) {
+            timeLimit = 180000;
+        } else if (limit === 5000) {
+            timeLimit = 300000;
+        } else if (limit === 50000) {
+            timeLimit = 600000;
+        } else if (limit === Infinity) {
+            timeLimit = 1800000;
+        } else {
+            timeLimit = 60000;
+        }
+
+        const stackStartTime = Date.now();
+
+        while (stack.length > 0) {
+            if (++stackIter % 500 === 0) await new Promise(r => setTimeout(r, 0));
+
+            if (Date.now() - stackStartTime > timeLimit) break;
+
+            const { slotIdx, usedIds, currentPool, currentRes } = stack.pop();
+            if (slotIdx === groupIndices.length) {
+                const total = currentRes.reduce((s, r) => s + r.score, 0);
+                if (total > groupBestScore) { groupBestScore = total; groupBestRes = [...currentRes]; }
+                continue;
+            }
+            const candidates = candidatesPerSlot[slotIdx];
+            for (let i = candidates.length - 1; i >= 0; i--) {
+                const cand = candidates[i];
+                if ((cand.acc.id !== 'none' && usedIds.has(cand.acc.id)) || (cand.sp.id !== 'none' && usedIds.has(cand.sp.id)) || (cand.pd.id !== 'none' && usedIds.has(cand.pd.id))) continue;
+
+                let bestDist = [0, 0, 0]; let bestS = -1; let bestAlloc = null;
+                for (const dist of GEM_DISTS) {
+                    const alloc = currentPool.allocate(dist);
+                    if (alloc) {
+                        const r = calculateStats({ ...cand.dragon, accPct: cand.acc, spiritStats: cand.spStats, pendantPct: cand.pd.pct, collection: tarSettings.collection, potion: cand.dragon.potion, nerfKey: cand.dragon.nerfKey }, alloc.gems, cand.ench);
+                        if (r.score > bestS) { bestS = r.score; bestDist = dist; bestAlloc = alloc; }
+                        currentPool.restore(alloc.rollback);
+                    }
+                }
+
+                if (bestAlloc) {
+                    const finalAlloc = bestAlloc;
+                    const finalR = calculateStats({ ...cand.dragon, accPct: cand.acc, spiritStats: cand.spStats, pendantPct: cand.pd.pct, collection: tarSettings.collection, potion: cand.dragon.potion, nerfKey: cand.dragon.nerfKey }, finalAlloc.gems, cand.ench);
+
+                    const nextUsed = new Set(usedIds);
+                    if (cand.acc.id !== 'none') nextUsed.add(cand.acc.id);
+                    if (cand.sp.id !== 'none') nextUsed.add(cand.sp.id);
+                    if (cand.pd.id !== 'none') nextUsed.add(cand.pd.id);
+
+                    const nextPool = currentPool.clone();
+                    nextPool.allocate(bestDist);
+
+                    stack.push({ slotIdx: slotIdx + 1, usedIds: nextUsed, currentPool: nextPool, currentRes: [...currentRes, { ...finalR, dragonIdx: groupIndices[slotIdx], dragon: cand.dragon, acc: cand.acc, sp: cand.sp, pd: cand.pd, gems: finalAlloc.gems, dist: bestDist, enchName: cand.ench ? (cand.ench === 'hp' ? '(체)' : cand.ench === 'atk' ? '(공)' : '(방)') : '' }] });
+                }
+            }
+        }
+        if (groupBestScore > globalBestScore) { globalBestScore = groupBestScore; globalBestSelection = groupBestRes; }
+    }
+
+    if (!globalBestSelection) { yield { combination: [], warning: "Combination failed" }; return; }
+
+    const finalComb = [null, null, null];
+    globalBestSelection.forEach((item, idx) => {
+        if (idx >= 3) return;
+        const dKey = `${normalizeType(item.dragon.typ)}|${item.dragon.buff}`;
+        const denom = TAR_DENOM[dKey] || 1000000000;
+        const safeSpInput = (item.sp && item.sp.input) ? item.sp.input : [];
+        const safePdPct = (item.pd && item.pd.pct) ? item.pd.pct : { hp: 0, atk: 0, def: 0 };
+
+        finalComb[idx] = {
+            ...item,
+            dist: item.dist,
+            tar: calculateTar(item.score, denom),
+            gemString: formatGemString(item.gems, lang),
+            accName: item.acc.id === 'none' ? (lang === 'en' ? 'None' : '없음') : `${translateAcc(item.acc.name, lang)} ${item.acc.lv}`,
+            spString: formatSpirit(safeSpInput, lang),
+            pndString: `${Math.round(safePdPct.hp * 100)}/${Math.round(safePdPct.atk * 100)}/${Math.round(safePdPct.def * 100)}`
+        };
+    });
+    yield { totalScore: globalBestScore, avgScore: globalBestScore / 3, avgTar: finalComb.reduce((a, b) => a + (b ? b.tar : 0), 0) / 3, combination: finalComb };
+}
+
+function createDefaultDragon(id) { return { id, typ: "체", grade: "9.0", buff: "HP40%", use: true, nerfKey: "너프 없음", potion: { hp: 24, atk: 6, def: 6 }, potionName: "기본(크/회/자)", boundSpirit: { use: false, id: `bound_sp_${id}`, input: [{ stat: "체력", type: "%" }, { stat: "공격력", type: "%" }, { stat: "방어력", type: "%" }, { stat: "방어력", type: "+" }, { stat: "체력", type: "+" }] } }; }
+function createDefaultSpirit(id) { return { id: `sp_${id}_${Math.random()}`, input: [{ stat: "체력", type: "%" }, { stat: "공격력", type: "%" }, { stat: "방어력", type: "%" }, { stat: "방어력", type: "+" }, { stat: "체력", type: "+" }], use: true }; }
+function createDefaultPendant(id) { return { id: `pd_${id}_${Math.random()}`, pct: { hp: 0, atk: 0, def: 0 }, use: true }; }
+
 export default function Home() {
     const [gems, setGems] = useState({});
     const [lang, setLang] = useState("ko");
     const [dragons, setDragons] = useState(Array(3).fill(null).map((_, i) => createDefaultDragon(i)));
-    const [spirits, setSpirits] = useState([createDefaultSpirit(101)]);
-    const [pendants, setPendants] = useState([createDefaultPendant(201)]);
+    const [spirits, setSpirits] = useState(() => [createDefaultSpirit(0), createDefaultSpirit(1), createDefaultSpirit(2)]);
+    const [pendants, setPendants] = useState(() => [createDefaultPendant(0), createDefaultPendant(1), createDefaultPendant(2)]);
     const [accInv, setAccInv] = useState(ACCESSORY_DB_EXPANDED);
     const [tarSettings, setTarSettings] = useState({ collection: { hp: 240, atk: 60, def: 60 } });
     
-    const [result, setResult] = useState(null);
-    const [rankings, setRankings] = useState([]);
-    const [isCalculating, setIsCalculating] = useState(false);
-    const [showRankModal, setShowRankModal] = useState(false);
-    const [selectedRankDetail, setSelectedRankDetail] = useState(null);
+    // [상태 변수 복구]
     const [currentSlot, setCurrentSlot] = useState(1);
     const [calcMode, setCalcMode] = useState("avg");
     const [precMode, setPrecMode] = useState(3000);
     const [showNoBuff, setShowNoBuff] = useState(false);
 
+    const [result, setResult] = useState(null);
+    const [isCalculating, setIsCalculating] = useState(false);
+    const [timer, setTimer] = useState(0);
+    const timerRef = useRef(null);
+
+    // 순위표 관련 상태
+    const [rankings, setRankings] = useState([]);
+    const [showRankModal, setShowRankModal] = useState(false);
+    const [selectedRankDetail, setSelectedRankDetail] = useState(null);
+
+    // 서버(KV)에서 랭킹 불러오기
     useEffect(() => {
         try { const s = localStorage.getItem('my_gems'); if(s) setGems(JSON.parse(s)); } catch(e){}
         fetch('/api/rank').then(r=>r.json()).then(setRankings).catch(()=>{});
     }, []);
-
-    // [이 부분이 빠져서 에러가 났었습니다! 복구 완료]
+    
+    // [중요] 누락되었던 groupedAccs 변수 정의
     const groupedAccs = useMemo(() => {
         const g = {}; accInv.forEach(a => { if(!g[a.lv]) g[a.lv] = []; g[a.lv].push(a); });
         return Object.entries(g).sort((a,b)=>Number(b[0])-Number(a[0])); 
     }, [accInv]);
 
+    // [추가] gemCounts 복구
     const gemCounts = useMemo(() => {
         const c = { 체:0, 공:0, 방:0 };
         Object.entries(gems).forEach(([k, v]) => { const parts = k.split('_'); if(parts.length < 2) return; let type = parts[0]; if(type==='HP') type='체'; if(type==='ATK') type='공'; if(type==='DEF') type='방'; if(c[type] !== undefined) c[type] += Number(v); });
         return c;
     }, [gems]);
 
+    // [추가] t 함수 복구
+    const t = (k) => {
+        const dict = {
+            ko: { title: "⚔️ 길드전 셋팅 계산기 v21.3", env: "📅 환경 설정", col: "컬렉션", gem: "💎 젬 인벤토리", sp: "👻 공용 정령", pd: "🔮 펜던트", acc: "💍 장신구 인벤토리", calc: "🚀 통합 최적화 시작", loading: "⏳ 계산 중...", save: "저장", load: "불러오기", add: "+ 추가", reset: "초기화", total: "총합 비벨", avg: "평균 비벨", tar: "평균 TAR", bound: "🔒 귀속 정령", potion: "물약", nerf: "너프", all: "전체", off: "해제", lv: "레벨", toggle_buff: "버프 제외 수치 보기", reset_all: "⚠️ 데이터 초기화",
+            mode_avg: "⚖️ 평균 모드", mode_focus: "👑 몰아주기", prec_sfast: "🚀 초신속(1천)", prec_fast: "⚡ 신속(3천)", prec_mid: "⚖️ 중간(5천)", prec_high: "🎯 정확(5만)", prec_all: "♾️ 전수(무제한)" },
+            en: { title: "⚔️ Guild War Calculator v21.3", env: "📅 Settings", col: "Collection", gem: "💎 Gems", sp: "👻 Spirits", pd: "🔮 Pendants", acc: "💍 Accessories", calc: "🚀 Optimize", loading: "⏳ Calculating...", save: "Save", load: "Load", add: "+ Add", reset: "Reset", total: "Total Score", avg: "Avg Score", tar: "Avg TAR", bound: "🔒 Bound Spirit", potion: "Potion", nerf: "Nerf", all: "All", off: "Off", lv: "Lv", toggle_buff: "View Stats without Buffs", reset_all: "⚠️ Reset Data",
+            mode_avg: "⚖️ Average", mode_focus: "👑 Focus", prec_sfast: "🚀 S-Fast", prec_fast: "⚡ Fast", prec_mid: "⚖️ Mid", prec_high: "🎯 High", prec_all: "♾️ All" }
+        };
+        return dict[lang][k];
+    };
+    
     const handleCalc = async () => {
-        setIsCalculating(true); setResult(null);
-        await new Promise(r => setTimeout(r, 100));
-
-        const poolMaster = new GemPool(gems);
-        const activeDragons = dragons.filter(d => d.use);
-        const activeAccs = accInv.filter(a => a.use);
-        const activeSpirits = spirits.filter(s => s.use);
-        const activePendants = pendants.filter(p => p.use);
-
-        let bestTotal = -1; let bestSelection = null;
-
-        for (let loop = 0; loop < 200; loop++) {
-            const pool = poolMaster.clone();
-            const currentComb = [];
-            let currentTotal = 0;
-            const usedIds = new Set();
-
-            for (const d of activeDragons) {
-                let dBest = { score: -1 };
-                const possibleAccs = [...activeAccs.filter(a => !usedIds.has(a.id)), { id: 'none', hp:0, atk:0, def:0, name: "없음" }];
-                const acc = possibleAccs[Math.floor(Math.random() * possibleAccs.length)] || { id: 'none', hp:0, atk:0, def:0, name: "없음" };
-                const sp = activeSpirits.length ? activeSpirits[Math.floor(Math.random() * activeSpirits.length)] : { input: [] };
-                const pd = activePendants.length ? activePendants[Math.floor(Math.random() * activePendants.length)] : { pct: { hp:0, atk:0, def:0 } };
-                
-                for (const dist of GEM_DISTS) {
-                    const alloc = pool.allocate(dist);
-                    if (!alloc) continue;
-                    const res = calculateStats({ ...d, accPct: acc, spiritStats: convertSpiritToStats(sp.input), pendantPct: pd.pct, collection: tarSettings.collection }, alloc.gems);
-                    if (res.score > dBest.score) { dBest = { ...res, acc, sp, pd, gems: alloc.gems, dist }; }
-                    pool.restore(alloc.rollback);
-                }
-                if (dBest.score > 0) {
-                    pool.allocate(dBest.dist);
-                    if (dBest.acc.id !== 'none') usedIds.add(dBest.acc.id);
-                    currentComb.push(dBest);
-                    currentTotal += dBest.score;
-                }
+        setIsCalculating(true); setResult(null); setTimer(0);
+        const timerId = setInterval(() => setTimer(t => t + 0.1), 100);
+        try {
+            if (calcMode === 'focus') {
+                const res = await optimizeFocusMode(dragons, gems, { accessories: accInv, spirits, pendants }, tarSettings, precMode, lang);
+                setResult(res);
+            } else {
+                const gen = optimizeAverageMode(dragons, gems, { accessories: accInv, spirits, pendants }, tarSettings, precMode, 'ko');
+                for await (const res of gen) { setResult(res); }
             }
-            if (currentTotal > bestTotal) { bestTotal = currentTotal; bestSelection = currentComb; }
+        } catch (e) { console.error(e); alert("Error: " + e.message); } finally { 
+            clearInterval(timerId); setIsCalculating(false); 
         }
-
-        if (bestSelection) {
-            setResult({
-                totalScore: bestTotal,
-                combination: bestSelection.map(res => ({
-                    ...res,
-                    gemString: formatGemString(res.gems),
-                    accName: res.acc.name + (res.acc.lv ? ` ${res.acc.lv}` : ""),
-                    spString: res.sp.input ? res.sp.input.slice(0,4).map(i=>`${i.stat[0]}${i.type}`).join(" ") : "-",
-                    pndString: res.pd.pct ? `${Math.round(res.pd.pct.hp*100)}/${Math.round(res.pd.pct.atk*100)}/${Math.round(res.pd.pct.def*100)}` : "0/0/0",
-                    tar: (res.score / (TAR_DENOM[`${res.dragon.typ}|${res.dragon.buff}`] || 1000000000)) * 100
-                }))
-            });
-        }
-        setIsCalculating(false);
     };
 
     const updateServer = (newRankings) => {
         setRankings(newRankings);
-        fetch('/api/rank', { method: 'POST', body: JSON.stringify(newRankings) });
+        fetch('/api/rank', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(newRankings)
+        }).catch(()=>{});
     };
 
     const exportResult = () => {
         if(!result) return;
-        const name = prompt("순위표 닉네임 입력");
-        if(!name) return;
-        const newRank = { nickname: name, totalScore: result.totalScore, avgTar: result.combination.reduce((a,b)=>a+b.tar,0)/result.combination.length, date: new Date().toLocaleString() };
-        const next = [newRank, ...rankings].sort((a,b) => b.totalScore - a.totalScore).slice(0, 50);
-        updateServer(next);
-        alert("순위표에 등록되었습니다!");
+        const nickname = prompt("해당 결과를 내보내시겠습니까?\n닉네임을 입력해주세요.");
+        if(!nickname) return;
+
+        const existingIndex = rankings.findIndex(r => r.nickname === nickname);
+        if(existingIndex !== -1 && !confirm("이미 등록된 닉네임입니다. 덮어씌우시겠습니까?")) return;
+
+        const avgScore = Math.round(result.totalScore / 3);
+        const avgTar = result.combination.reduce((a, b) => a + b.tar, 0) / 3;
+        const totalBuffs = result.combination.reduce((sum, item) => sum + getBuffWeight(item.dragon.buff), 0);
+
+        const newRank = { 
+            nickname, 
+            totalScore: result.totalScore, 
+            avgScore, 
+            avgTar, 
+            totalBuffs,
+            combination: result.combination, 
+            date: new Date().toLocaleString() 
+        };
+        
+        let nextRanks = [...rankings];
+        if (existingIndex !== -1) {
+            nextRanks[existingIndex] = newRank;
+        } else {
+            nextRanks.push(newRank);
+        }
+        
+        nextRanks.sort((a,b) => b.totalScore - a.totalScore);
+        updateServer(nextRanks);
+        alert("순위표에 등록되었습니다.");
+    };
+
+    const openRankings = () => {
+        const pw = prompt("비밀번호를 입력하세요.");
+        if(pw === "5454") setShowRankModal(true);
+        else alert("비밀번호가 틀렸습니다.");
+    };
+
+    const deleteRanking = (index) => {
+        if(!confirm("이 기록을 삭제하시겠습니까?")) return;
+        const nextRanks = rankings.filter((_, i) => i !== index);
+        updateServer(nextRanks);
+    };
+
+    const clearRankings = () => {
+        if(!confirm("정말로 모든 순위표 데이터를 삭제하시겠습니까?")) return;
+        updateServer([]);
+    };
+
+    const savePreset = (slot) => { if(confirm(`${slot} Save?`)) { const data = { dragons, spirits, pendants, accInv, tarSettings }; localStorage.setItem(`gw_preset_${slot}`, JSON.stringify(data)); alert("Saved."); } };
+    const loadPreset = (slot) => { if(confirm(`${slot} Load?`)) { const d = localStorage.getItem(`gw_preset_${slot}`); if(d) { const p = JSON.parse(d); if(p.dragons) setDragons(p.dragons); if(p.spirits) setSpirits(p.spirits); if(p.pendants) setPendants(p.pendants); if(p.accInv) setAccInv(p.accInv); if(p.tarSettings) setTarSettings(p.tarSettings); } else { alert("No Data."); } } };
+
+    const resetAllData = () => {
+        if (confirm("정말로 모든 데이터를 초기화하시겠습니까? (저장된 프리셋 포함)")) {
+            localStorage.clear();
+            window.location.reload();
+        }
     };
 
     const onGemChange = (s, v, c) => {
@@ -265,10 +637,8 @@ export default function Home() {
     const toggleAcc = (id) => setAccInv(accInv.map(a => a.id === id ? { ...a, use: !a.use } : a));
     const toggleEnchant = (id, type) => setAccInv(accInv.map(a => a.id === id ? { ...a, enchants: { ...a.enchants, [type]: !a.enchants[type] } } : a));
     const toggleLevel = (lv, use) => setAccInv(accInv.map(a => a.lv === Number(lv) ? { ...a, use } : a));
+    const addDragon = () => setDragons([...dragons, createDefaultDragon(dragons.length)]);
     const removeDragon = (idx) => setDragons(dragons.filter((_, i) => i !== idx));
-    const savePreset = (slot) => { if(confirm(`${slot} Save?`)) { const data = { dragons, spirits, pendants, accInv, tarSettings }; localStorage.setItem(`gw_preset_${slot}`, JSON.stringify(data)); alert("Saved."); } };
-    const loadPreset = (slot) => { if(confirm(`${slot} Load?`)) { const d = localStorage.getItem(`gw_preset_${slot}`); if(d) { const p = JSON.parse(d); if(p.dragons) setDragons(p.dragons); if(p.spirits) setSpirits(p.spirits); if(p.pendants) setPendants(p.pendants); if(p.accInv) setAccInv(p.accInv); if(p.tarSettings) setTarSettings(p.tarSettings); } else { alert("No Data."); } } };
-    const resetAllData = () => { if (confirm("초기화?")) { localStorage.clear(); window.location.reload(); } };
 
     return (
         <main className="min-h-screen bg-[#0b0f19] text-slate-100 p-2 font-sans select-none pb-20">
@@ -278,35 +648,71 @@ export default function Home() {
                         ← 메인으로
                     </Link>
                     <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">{t('title')}</h1>
-                    <button onClick={()=>setShowRankModal(true)} className="bg-amber-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-amber-500 transition shadow-lg">🏆 비벨 순위표 보기</button>
+                    <button onClick={openRankings} className="bg-amber-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-amber-500 transition shadow-lg">🏆 비벨 순위표 보기</button>
                 </div>
                 <div className="flex flex-col items-end gap-2">
                     <button onClick={()=>setLang(lang==='ko'?'en':'ko')} className="text-xs bg-slate-700 px-2 py-1 rounded text-white hover:bg-slate-600">{lang==='ko'?'🇺🇸 English':'🇰🇷 한국어'}</button>
-                    <div className="flex flex-wrap gap-1 items-center bg-[#1b1f2b] p-2 rounded-lg border border-slate-700 max-w-[300px] justify-center">{[1,2,3,4,5,6,7,8,9,10].map(num => (<button key={num} onClick={() => setCurrentSlot(num)} className={`w-6 h-6 rounded text-xs font-bold ${currentSlot === num ? 'bg-indigo-500 text-white' : 'bg-[#111827] text-slate-500'}`}>{num}</button>))}<div className="w-full h-1"></div><button onClick={() => savePreset(currentSlot)} className="text-xs bg-green-600 px-2 py-1 rounded text-white">Save</button><button onClick={() => loadPreset(currentSlot)} className="text-xs bg-slate-600 px-2 py-1 rounded text-white">Load</button><button onClick={resetAllData} className="text-xs bg-red-600 px-2 py-1 rounded text-white ml-1">Reset</button></div>
+                    <div className="flex flex-wrap gap-1 items-center bg-[#1b1f2b] p-2 rounded-lg border border-slate-700 max-w-[300px] justify-center">{[1,2,3,4,5,6,7,8,9,10].map(num => (<button key={num} onClick={() => setCurrentSlot(num)} className={`w-6 h-6 rounded text-xs font-bold ${currentSlot === num ? 'bg-indigo-500 text-white' : 'bg-[#111827] text-slate-500'}`}>{num}</button>))}<div className="w-full h-1"></div><button onClick={() => savePreset(currentSlot)} className="text-xs bg-green-600 px-2 py-1 rounded text-white">{t('save')}</button><button onClick={() => loadPreset(currentSlot)} className="text-xs bg-slate-600 px-2 py-1 rounded text-white">{t('load')}</button><button onClick={resetAllData} className="text-xs bg-red-600 px-2 py-1 rounded text-white ml-1">{t('reset_all')}</button></div>
                 </div>
             </div>
 
             <div className="max-w-[1600px] mx-auto bg-[#1b1f2b] p-3 rounded-xl border border-slate-700 mb-4 flex flex-wrap gap-4 items-center justify-between">
                 <div className="flex items-center gap-4"><div className="text-sm font-bold text-yellow-400">{t('env')}</div><select className="bg-[#111827] text-white text-sm p-1 rounded" value={tarSettings.type} onChange={e=>setTarSettings({...tarSettings, type:e.target.value})}>{DRAGON_TYPES.map(t=><option key={t}>{lang==='en'?t.replace('체','HP').replace('공','ATK').replace('방','DEF').replace('H/A','H/A').replace('H/D','H/D').replace('A/D','A/D'):t}</option>)}</select><select className="bg-[#111827] text-white text-sm p-1 rounded" value={tarSettings.buff} onChange={e=>setTarSettings({...tarSettings, buff:e.target.value})}>{TAR_BUFFS.map(b=><option key={b}>{b}</option>)}</select></div>
                 <div className="flex items-center gap-2 bg-[#111827] px-2 py-1 rounded border border-slate-600"><span className="text-[10px] text-gray-400">{t('col')}</span><div className="flex items-center gap-1"><span className="text-[10px] text-red-400">HP</span><input type="number" className="w-10 bg-transparent text-white text-[10px] text-right" value={tarSettings.collection.hp} onChange={e=>setTarSettings({...tarSettings, collection:{...tarSettings.collection, hp:Number(e.target.value)}})} /></div><div className="flex items-center gap-1"><span className="text-[10px] text-blue-400">ATK</span><input type="number" className="w-8 bg-transparent text-white text-[10px] text-right" value={tarSettings.collection.atk} onChange={e=>setTarSettings({...tarSettings, collection:{...tarSettings.collection, atk:Number(e.target.value)}})} /></div><div className="flex items-center gap-1"><span className="text-[10px] text-green-400">DEF</span><input type="number" className="w-8 bg-transparent text-white text-[10px] text-right" value={tarSettings.collection.def} onChange={e=>setTarSettings({...tarSettings, collection:{...tarSettings.collection, def:Number(e.target.value)}})} /></div></div>
-                <button onClick={()=>setDragons([...dragons, createDefaultDragon(dragons.length)])} className="text-xs bg-blue-600 px-3 py-1.5 rounded text-white font-bold">Add Dragon</button>
+                <button onClick={addDragon} className="text-xs bg-blue-600 px-3 py-1.5 rounded text-white font-bold">{t('add')} Dragon</button>
+            </div>
+
+            <div className="max-w-[1600px] mx-auto bg-[#1b1f2b] p-3 rounded-xl border border-slate-700 mb-4 flex flex-wrap gap-4 items-center justify-center">
+                <div className="flex gap-2">
+                    <button onClick={()=>setCalcMode('focus')} className={`px-4 py-2 rounded text-sm font-bold ${calcMode==='focus'?'bg-yellow-600 text-white':'bg-slate-700 text-slate-400'}`}>{t('mode_focus')}</button>
+                    <button onClick={()=>setCalcMode('avg')} className={`px-4 py-2 rounded text-sm font-bold ${calcMode==='avg'?'bg-indigo-600 text-white':'bg-slate-700 text-slate-400'}`}>{t('mode_avg')}</button>
+                </div>
+                <div className="w-[1px] h-8 bg-slate-600"></div>
+                <div className="flex gap-1">
+                    <button onClick={()=>setPrecMode(1000)} className={`px-2 py-1 rounded text-xs ${precMode===1000?'bg-cyan-600 text-white':'bg-slate-700 text-slate-400'}`}>{t('prec_sfast')}</button>
+                    <button onClick={()=>setPrecMode(3000)} className={`px-2 py-1 rounded text-xs ${precMode===3000?'bg-green-600 text-white':'bg-slate-700 text-slate-400'}`}>{t('prec_fast')}</button>
+                    <button onClick={()=>setPrecMode(5000)} className={`px-2 py-1 rounded text-xs ${precMode===5000?'bg-blue-600 text-white':'bg-slate-700 text-slate-400'}`}>{t('prec_mid')}</button>
+                    <button onClick={()=>setPrecMode(50000)} className={`px-2 py-1 rounded text-xs ${precMode===50000?'bg-purple-600 text-white':'bg-slate-700 text-slate-400'}`}>{t('prec_high')}</button>
+                    <button onClick={()=>setPrecMode(Infinity)} className={`px-2 py-1 rounded text-xs ${precMode===Infinity?'bg-red-600 text-white':'bg-slate-700 text-slate-400'}`}>{t('prec_all')}</button>
+                </div>
             </div>
 
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4">
                 <div className="lg:col-span-3 space-y-3">
                     {dragons.map((d, i) => (
-                        <div key={i} className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700 relative"><button onClick={()=>removeDragon(i)} className="absolute top-2 right-2 text-red-500 text-[10px]">🗑️</button><div className="flex justify-between mb-2 font-bold text-indigo-400 text-sm">{t('dragon')} {i+1}<input type="checkbox" checked={d.use} onChange={e=>{const n=[...dragons];n[i].use=e.target.checked;setDragons(n)}} className="ml-2"/></div><div className="space-y-1 mb-2"><div className="flex gap-1 mb-1"><select className="bg-[#111827] text-xs p-1 rounded w-full" value={d.typ} onChange={e=>updateDragon(i, 'typ', e.target.value)}>{DRAGON_TYPES.map(t=><option key={t}>{lang==='en'?t.replace('체','HP').replace('공','ATK').replace('방','DEF').replace('H/A','H/A').replace('H/D','H/D').replace('A/D','A/D'):t}</option>)}</select><select className="bg-[#111827] text-xs p-1 rounded w-full" value={d.grade} onChange={e=>updateDragon(i, 'grade', e.target.value)} disabled={d.typ.includes("(진각)")}>{GRADES.map(g=><option key={g}>{g}</option>)}</select></div><div className="flex gap-1 mb-1"><select className="bg-[#111827] text-xs p-1 rounded w-full text-green-400" value={d.buff} onChange={e=>updateDragon(i, 'buff', e.target.value)}>{Object.keys(BUFFS_DB).map(b=><option key={b}>{b}</option>)}</select><select className="bg-[#111827] text-xs p-1 rounded w-full text-red-400" value={d.nerfKey} onChange={e=>updateDragon(i, 'nerfKey', e.target.value)}>{ALL_NERFS.map(n=><option key={n} value={n}>{n==='너프 없음'&&lang==='en'?'No Nerf':n}</option>)}</select></div><select className="bg-[#111827] text-xs p-1 rounded w-full text-pink-300" value={d.potionName} onChange={e=>updateDragon(i, 'potionName', e.target.value)}>{POTION_KEYS.map(p=><option key={p} value={p}>{lang==='en'?p.replace('기본(크/회/자)', 'Crit/Eva/Tonic').replace('단계','Lv').replace('체력','HP').replace('공격력','ATK').replace('방어력','DEF'):p}</option>)}</select></div><div className="bg-[#111827] p-2 rounded mt-2"><div className="flex justify-between items-center mb-1"><span className="text-[10px] text-pink-400 font-bold">{t('bound')}</span><input type="checkbox" checked={d.boundSpirit.use} onChange={()=>{const n=[...dragons];n[i].boundSpirit.use=!n[i].boundSpirit.use;setDragons(n)}} /></div>{d.boundSpirit.use && <div className="space-y-0.5">{d.boundSpirit.input.map((r, ri) => (<div key={ri} className="flex gap-1"><select className="bg-[#252a37] text-[8px] p-0.5 rounded flex-1" value={r?.stat || '체력'} onChange={e=>{const n=[...dragons];if(n[i].boundSpirit.input[ri]) n[i].boundSpirit.input[ri].stat=e.target.value;setDragons(n)}}>{ri<4?SPIRIT_STATS.map(t=><option key={t}>{lang==='en'?t.replace('체력','HP').replace('공격력','ATK').replace('방어력','DEF'):t}</option>):["체력40","공격력10","방어력10"].map(t=><option key={t}>{t}</option>)}</select>{ri < 4 && <select className="bg-[#252a37] text-[8px] p-0.5 rounded w-8" value={r?.type || '%'} onChange={e=>{const n=[...dragons];if(n[i].boundSpirit.input[ri]) n[i].boundSpirit.input[ri].type=e.target.value;setDragons(n)}}>{SPIRIT_MODES.map(t=><option key={t}>{t}</option>)}</select>}</div>))}</div>}</div></div>
+                        <div key={i} className="bg-[#1b1f2b] p-4 rounded-xl border border-slate-700">
+                            <div className="flex justify-between mb-3 font-bold text-indigo-400">드래곤 {i+1} <input type="checkbox" checked={d.use} onChange={e=>{const n=[...dragons];n[i].use=e.target.checked;setDragons(n)}}/></div>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                <select className="bg-[#111827] p-2 rounded" value={d.typ} onChange={e=>updateDragon(i, 'typ', e.target.value)}>{DRAGON_TYPES.map(t=><option key={t}>{t}</option>)}</select>
+                                <select className="bg-[#111827] p-2 rounded" value={d.grade} onChange={e=>updateDragon(i, 'grade', e.target.value)} disabled={d.typ.includes("(진각)")}>{GRADES.map(g=><option key={g}>{g}</option>)}</select>
+                                <select className="bg-[#111827] p-2 rounded text-green-400" value={d.buff} onChange={e=>updateDragon(i, 'buff', e.target.value)}>{TAR_BUFFS.map(b=><option key={b}>{b}</option>)}</select>
+                                <select className="bg-[#111827] p-2 rounded text-red-400" value={d.nerfKey} onChange={e=>updateDragon(i, 'nerfKey', e.target.value)}>{ALL_NERFS.map(n=><option key={n}>{n}</option>)}</select>
+                            </div>
+                        </div>
                     ))}
                 </div>
 
                 <div className="lg:col-span-5 space-y-4">
-                    <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700"><div className="flex justify-between items-center mb-2"><div className="text-xs font-bold text-slate-400">{t('gem')}</div><div className="flex gap-3 text-[10px]"><span className={gemCounts.체 > 15 ? "text-red-500" : "text-indigo-400"}>HP {gemCounts.체}/15</span><span className={gemCounts.공 > 15 ? "text-red-500" : "text-indigo-400"}>ATK {gemCounts.공}/15</span><span className={gemCounts.방 > 15 ? "text-red-500" : "text-indigo-400"}>DEF {gemCounts.방}/15</span></div></div><div className="grid grid-cols-7 gap-1">{GEM_VALUES.map(v => (<div key={v} className="flex flex-col gap-1"><span className="text-[9px] text-center text-slate-600">{v}</span>{GEM_STATS.map(s => (<input key={s} type="number" className="bg-[#111827] text-center text-[9px] p-1 rounded outline-none" placeholder={lang==='en'?(s==='체'?'HP':s==='공'?'ATK':'DEF'):s} value={gems[`${s==='HP'||s==='체'?'체':s==='ATK'||s==='공'?'공':'방'}_${v}`]||''} onChange={e=>onGemChange(s,v,e.target.value)}/>))}</div>))}</div></div>
+                    <div className="bg-[#1b1f2b] p-4 rounded-xl border border-slate-700">
+                        <div className="text-xs font-bold text-slate-400 mb-3 uppercase">💎 Gem Inventory</div>
+                        <div className="grid grid-cols-7 gap-2">
+                            {GEM_VALUES.map(v => (
+                                <div key={v} className="flex flex-col gap-1">
+                                    <span className="text-[10px] text-center text-slate-500 font-mono">{v}</span>
+                                    {GEM_STATS.map(s => (
+                                        <input key={s} type="number" className="bg-[#111827] text-center text-xs p-1 rounded border border-slate-800 outline-none focus:border-indigo-500" 
+                                               value={gems[`${s}_${v}`] || ''} onChange={e=>onGemChange(s,v,e.target.value)} placeholder={s}/>
+                                    ))}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                     
                     {/* 정령 UI */}
-                    <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-green-400">{t('sp')}</span><button onClick={()=>setSpirits([...spirits, createDefaultSpirit(Date.now())])} className="text-[10px] bg-slate-700 px-2 rounded">{t('add')}</button></div><div className="h-40 overflow-y-auto space-y-1 custom-scrollbar">{spirits.map((s, i) => (<div key={s.id} className="bg-[#252a37] p-1 rounded flex gap-0.5 items-center"><span className="text-[9px] w-3">{i+1}</span>{s.input.map((r, ri) => (<div key={ri} className="flex-1"><select className={`w-full bg-[#111827] text-[8px] p-0.5 rounded ${ri===4?'text-yellow-500':''}`} value={r?.stat || '체력'} onChange={e=>{const n=[...spirits];if(n[i].input[ri]) n[i].input[ri].stat=e.target.value;setSpirits(n)}}>{ri<4?SPIRIT_STATS.map(t=><option key={t}>{lang==='en'?t.replace('체력','HP').replace('공격력','ATK').replace('방어력','DEF'):t}</option>):["체력40","공격력10","방어력10"].map(t=><option key={t}>{t}</option>)}</select>{ri < 4 && <select className="w-full bg-[#111827] text-[8px] p-0.5 rounded text-center mt-0.5" value={r?.type || '%'} onChange={e=>{const n=[...spirits];if(n[i].input[ri]) n[i].input[ri].type=e.target.value;setSpirits(n)}}>{SPIRIT_MODES.map(t=><option key={t}>{t}</option>)}</select>}</div>))}<button onClick={()=>setSpirits(spirits.filter((_,x)=>x!==i))} className="text-red-500 text-[10px] px-1">x</button></div>))}</div></div>
+                    <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-green-400">{t('sp')}</span><button onClick={()=>setSpirits([...spirits, createDefaultSpirit(spirits.length)])} className="text-[10px] bg-slate-700 px-2 rounded">{t('add')}</button></div><div className="h-40 overflow-y-auto space-y-1 custom-scrollbar">{spirits.map((s, i) => (<div key={i} className="bg-[#252a37] p-1 rounded flex gap-0.5 items-center"><span className="text-[9px] w-3">{i+1}</span>{s.input.map((r, ri) => (<div key={ri} className="flex-1"><select className={`w-full bg-[#111827] text-[8px] p-0.5 rounded ${ri===4?'text-yellow-500':''}`} value={r?.stat || '체력'} onChange={e=>{const n=[...spirits];if(n[i].input[ri]) n[i].input[ri].stat=e.target.value;setSpirits(n)}}>{ri<4?SPIRIT_STATS.map(t=><option key={t}>{lang==='en'?t.replace('체력','HP').replace('공격력','ATK').replace('방어력','DEF'):t}</option>):["체력40","공격력10","방어력10"].map(t=><option key={t}>{t}</option>)}</select>{ri < 4 && <select className="w-full bg-[#111827] text-[8px] p-0.5 rounded text-center mt-0.5" value={r?.type || '%'} onChange={e=>{const n=[...spirits];if(n[i].input[ri]) n[i].input[ri].type=e.target.value;setSpirits(n)}}>{SPIRIT_MODES.map(t=><option key={t}>{t}</option>)}</select>}</div>))}<button onClick={()=>setSpirits(spirits.filter((_,x)=>x!==i))} className="text-red-500 text-[10px] px-1">x</button></div>))}</div></div>
                     
                     {/* 펜던트 UI */}
-                    <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-pink-400">{t('pd')}</span><button onClick={()=>setPendants([...pendants, createDefaultPendant(Date.now())])} className="text-[10px] bg-slate-700 px-2 rounded">{t('add')}</button></div><div className="h-32 overflow-y-auto space-y-1 custom-scrollbar">{pendants.map((p, i) => (<div key={p.id} className="bg-[#252a37] p-1 rounded flex gap-1 items-center"><span className="text-[9px] w-3">{i+1}</span>{['hp','atk','def'].map(k => (<div key={k} className="flex-1 flex items-center bg-[#111827] rounded px-1"><span className={`text-[8px] mr-1 ${k==='hp'?'text-red-400':k==='atk'?'text-blue-400':'text-green-400'}`}>{k.toUpperCase()}</span><input type="number" className="w-full bg-transparent text-[10px] text-right outline-none" value={p.pct[k]*100} onChange={e=>{const n=[...pendants];n[i].pct[k]=Number(e.target.value)/100;setPendants(n)}}/></div>))}<button onClick={()=>setPendants(pendants.filter((_,x)=>x!==i))} className="text-red-500 text-[10px] px-1">x</button></div>))}</div></div>
+                    <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-pink-400">{t('pd')}</span><button onClick={()=>setPendants([...pendants, createDefaultPendant(pendants.length)])} className="text-[10px] bg-slate-700 px-2 rounded">{t('add')}</button></div><div className="h-32 overflow-y-auto space-y-1 custom-scrollbar">{pendants.map((p, i) => (<div key={i} className="bg-[#252a37] p-1 rounded flex gap-1 items-center"><span className="text-[9px] w-3">{i+1}</span>{['hp','atk','def'].map(k => (<div key={k} className="flex-1 flex items-center bg-[#111827] rounded px-1"><span className={`text-[8px] mr-1 ${k==='hp'?'text-red-400':k==='atk'?'text-blue-400':'text-green-400'}`}>{k.toUpperCase()}</span><input type="number" className="w-full bg-transparent text-[10px] text-right outline-none" value={p.pct[k]*100} onChange={e=>{const n=[...pendants];n[i].pct[k]=Number(e.target.value)/100;setPendants(n)}}/></div>))}<button onClick={()=>setPendants(pendants.filter((_,x)=>x!==i))} className="text-red-500 text-[10px] px-1">x</button></div>))}</div></div>
                 </div>
 
                 <div className="lg:col-span-4 space-y-4">
