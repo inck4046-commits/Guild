@@ -6,7 +6,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 
 // ============================================================================
-// [1] 데이터 및 상수
+// [1] 데이터 및 상수 (오류 방지를 위해 원본 형태 유지)
 // ============================================================================
 const DRAGON_TYPES = ["체", "공", "방", "체공", "체방", "공방", "(진각)체", "(진각)공", "(진각)방", "(진각)체공", "(진각)체방", "(진각)공방"];
 const GRADES = ["7.0", "8.0", "9.0"];
@@ -14,43 +14,84 @@ const GEM_VALUES = [40, 39, 38, 37, 36, 35, 34];
 const GEM_STATS = ["체", "공", "방"];
 const SPIRIT_STATS = ["체력", "공격력", "방어력"];
 const SPIRIT_MODES = ["%", "+"];
+
 const SPIRIT_FLAT_TBL = [null, [216, 54, 54], [240, 60, 60], [264, 66, 66], [480, 120, 120]];
 const SPIRIT_PCT_TBL = [null, [0.24, 0.24, 0.24], [0.28, 0.28, 0.28], [0.32, 0.32, 0.32], [0.40, 0.40, 0.40]];
-const GEM_DISTS = [[5,0,0],[0,5,0],[0,0,5],[4,1,0],[4,0,1],[1,4,0],[1,0,4],[0,4,1],[0,1,4],[3,2,0],[3,0,2],[2,3,0],[2,0,3],[0,3,2],[0,2,3],[3,1,1],[1,3,1],[1,1,3],[2,2,1],[2,1,2],[1,2,2],[0,0,0]];
-const TAR_DENOM = { "체|HP40%": 1078990080, "체|ATK40%": 990919800, "체|DEF40%": 990919800, "체|HP+ATK20%": 1016249274, "체|HP+DEF20%": 1020765286, "체|ATK+DEF20%": 965302272, "공|HP40%": 1011946650, "공|ATK40%": 1081981530, "공|DEF40%": 979086020, "공|HP+ATK20%": 1031112576, "공|HP+DEF20%": 975532896, "공|ATK+DEF20%": 1012677120, "방|HP40%": 1000230768, "방|ATK40%": 995980440, "방|DEF40%": 1081449600, "방|HP+ATK20%": 977294739, "방|HP+DEF20%": 1022795024, "방|ATK+DEF20%": 1013784800, "체공|HP40%": 1070406320, "체공|ATK40%": 1067050400, "체공|DEF40%": 952919044, "체공|HP+ATK20%": 1017420620, "체공|HP+DEF20%": 987639480, "체공|ATK+DEF20%": 983461784, "체방|HP40%": 1070406320, "체방|ATK40%": 952919044, "체방|DEF40%": 1067050400, "체방|HP+ATK20%": 986229088, "체방|HP+DEF20%": 1018647388, "체방|ATK+DEF20%": 981528492, "공방|HP40%": 990080000, "공방|ATK40%": 1051711596, "공방|DEF40%": 1054944000, "공방|HP+ATK20%": 992142605, "공방|HP+DEF20%": 993209700, "공방|ATK+DEF20%": 1011069696 };
+
+const GEM_DISTS = [
+    [5, 0, 0], [0, 5, 0], [0, 0, 5],
+    [4, 1, 0], [4, 0, 1], [1, 4, 0], [1, 0, 4], [0, 4, 1], [0, 1, 4],
+    [3, 2, 0], [3, 0, 2], [2, 3, 0], [2, 0, 3], [0, 3, 2], [0, 2, 3],
+    [3, 1, 1], [1, 3, 1], [1, 1, 3],
+    [2, 2, 1], [2, 1, 2], [1, 2, 2],
+    [0, 0, 0]
+];
+
+const TAR_DENOM = {
+    "체|HP40%": 1078990080, "체|ATK40%": 990919800, "체|DEF40%": 990919800, "체|HP+ATK20%": 1016249274, "체|HP+DEF20%": 1020765286, "체|ATK+DEF20%": 965302272,
+    "공|HP40%": 1011946650, "공|ATK40%": 1081981530, "공|DEF40%": 979086020, "공|HP+ATK20%": 1031112576, "공|HP+DEF20%": 975532896, "공|ATK+DEF20%": 1012677120,
+    "방|HP40%": 1000230768, "방|ATK40%": 995980440, "방|DEF40%": 1081449600, "방|HP+ATK20%": 977294739, "방|HP+DEF20%": 1022795024, "방|ATK+DEF20%": 1013784800,
+    "체공|HP40%": 1070406320, "체공|ATK40%": 1067050400, "체공|DEF40%": 952919044, "체공|HP+ATK20%": 1017420620, "체공|HP+DEF20%": 987639480, "체공|ATK+DEF20%": 983461784,
+    "체방|HP40%": 1070406320, "체방|ATK40%": 952919044, "체방|DEF40%": 1067050400, "체방|HP+ATK20%": 986229088, "체방|HP+DEF20%": 1018647388, "체방|ATK+DEF20%": 981528492,
+    "공방|HP40%": 990080000, "공방|ATK40%": 1051711596, "공방|DEF40%": 1054944000, "공방|HP+ATK20%": 992142605, "공방|HP+DEF20%": 993209700, "공방|ATK+DEF20%": 1011069696
+};
 const TAR_BUFFS = ["HP40%", "ATK40%", "DEF40%", "HP+ATK20%", "HP+DEF20%", "ATK+DEF20%"];
+
 const BUFFS_DB = { '0벞': { hp: 0, atk: 0, def: 0 }, 'HP20%': { hp: 0.2, atk: 0, def: 0 }, 'ATK20%': { hp: 0, atk: 0.2, def: 0 }, 'DEF20%': { hp: 0, atk: 0, def: 0.2 }, 'HP40%': { hp: 0.4, atk: 0, def: 0 }, 'ATK40%': { hp: 0, atk: 0.4, def: 0 }, 'DEF40%': { hp: 0, atk: 0, def: 0.4 }, 'HP+ATK20%': { hp: 0.2, atk: 0.2, def: 0 }, 'HP+DEF20%': { hp: 0.2, atk: 0, def: 0.2 }, 'ATK+DEF20%': { hp: 0, atk: 0.2, def: 0.2 } };
 const NERFS_DB = { '너프 없음': { hp: 0, atk: 0, def: 0 }, 'HP20%': { hp: 0.2, atk: 0, def: 0 }, 'ATK20%': { hp: 0, atk: 0.2, def: 0 }, 'DEF20%': { hp: 0, atk: 0, def: 0.2 }, 'HP40%': { hp: 0.4, atk: 0, def: 0 }, 'ATK40%': { hp: 0, atk: 0.4, def: 0 }, 'DEF40%': { hp: 0, atk: 0, def: 0.4 }, 'HP+ATK20%': { hp: 0.2, atk: 0.2, def: 0 }, 'HP+DEF20%': { hp: 0.2, atk: 0, def: 0.2 }, 'ATK+DEF20%': { hp: 0, atk: 0.2, def: 0.2 } };
 const ALL_NERFS = Object.keys(NERFS_DB);
-const BASE_STATS = { "체": { hp: 1252, atk: 176, def: 176 }, "공": { hp: 876, atk: 285, def: 161 }, "방": { hp: 788, atk: 185, def: 283 }, "체공": { hp: 1080, atk: 262, def: 133 }, "체방": { hp: 1080, atk: 133, def: 262 }, "공방": { hp: 720, atk: 242, def: 243 }, "(진각)체": { hp: 1113, atk: 156, def: 156 }, "(진각)공": { hp: 793, atk: 243, def: 149 }, "(진각)방": { hp: 685, atk: 156, def: 263 }, "(진각)체공": { hp: 977, atk: 235, def: 111 }, "(진각)체방": { hp: 977, atk: 111, def: 235 }, "(진각)공방": { hp: 641, atk: 216, def: 214 } };
-const AWAKENING_STATS = { "(진각)체": { hp: 144, atk: 12, def: 12 }, "(진각)공": { hp: 72, atk: 30, def: 12 }, "(진각)방": { hp: 96, atk: 24, def: 12 }, "(진각)체공": { hp: 96, atk: 18, def: 18 }, "(진각)체방": { hp: 96, atk: 12, def: 24 }, "(진각)공방": { hp: 72, atk: 24, def: 18 } };
+
+const BASE_STATS = {
+    "체": { hp: 1252, atk: 176, def: 176 }, "공": { hp: 876, atk: 285, def: 161 }, "방": { hp: 788, atk: 185, def: 283 }, "체공": { hp: 1080, atk: 262, def: 133 }, "체방": { hp: 1080, atk: 133, def: 262 }, "공방": { hp: 720, atk: 242, def: 243 },
+    "(진각)체": { "hp": 1113, "atk": 156, "def": 156 }, "(진각)공": { "hp": 793, "atk": 243, "def": 149 }, "(진각)방": { "hp": 685, "atk": 156, "def": 263 }, "(진각)체공": { "hp": 977, "atk": 235, "def": 111 }, "(진각)체방": { "hp": 977, "atk": 111, "def": 235 }, "(진각)공방": { "hp": 641, "atk": 216, "def": 214 }
+};
+const AWAKENING_STATS = {
+    "(진각)체": { "hp": 144, "atk": 12, "def": 12 }, "(진각)공": { "hp": 72, "atk": 30, "def": 12 }, "(진각)방": { "hp": 96, "atk": 24, "def": 12 }, "(진각)체공": { "hp": 96, "atk": 18, "def": 18 }, "(진각)체방": { "hp": 96, "atk": 12, "def": 24 }, "(진각)공방": { "hp": 72, "atk": 24, "def": 18 }
+};
 const GRADE_BONUS = { "체": { hp: 80, atk: 0, def: 0 }, "공": { hp: 0, atk: 20, def: 0 }, "방": { hp: 0, atk: 0, def: 20 }, "체공": { hp: 40, atk: 10, def: 0 }, "체방": { hp: 40, atk: 0, def: 10 }, "공방": { hp: 0, atk: 10, def: 10 } };
-const RAW_ACCESSORY_DATA = [["크발",0,0,0,0],["빛뿔공",5,0,5,0],["빛뿔공",8,0,8,0],["악보",16,16,0,0],["황보",16,0,16,0],["여보",16,0,0,16],["대뿔(방/체)",16,6,0,10],["대뿔(방/공)",16,0,6,10],["물뿔(체/공)",16,10,6,0],["물뿔(체/방)",16,10,0,6],["불뿔(공/방)",16,0,10,6],["불뿔(공/체)",16,6,10,0],["바뿔(공/체)",16,8,8,0],["바뿔(체/방)",16,8,0,8],["바뿔(공/방)",16,0,8,8],["악보",17,17,0,0],["황보",17,0,17,0],["여보",17,0,0,17],["대뿔(방/체)",17,6,0,11],["대뿔(방/공)",17,0,6,11],["물뿔(체/공)",17,11,6,0],["물뿔(체/방)",17,11,0,6],["불뿔(공/방)",17,0,11,6],["불뿔(공/체)",17,6,11,0],["바뿔(공/체)",17,9,8,0],["바뿔(체/방)",17,9,0,8],["바뿔(공/방)",17,0,9,8],["악보",18,18,0,0],["황보",18,0,18,0],["여보",18,0,0,18],["대뿔(방/체)",18,6,0,12],["대뿔(방/공)",18,0,6,12],["물뿔(체/공)",18,12,6,0],["물뿔(체/방)",18,12,0,6],["불뿔(공/방)",18,0,12,6],["불뿔(공/체)",18,6,12,0],["바뿔(공/체)",18,9,9,0],["바뿔(체/방)",18,9,0,9],["바뿔(공/방)",18,0,9,9],["악보",19,19,0,0],["황보",19,0,19,0],["여보",19,0,0,19],["대뿔(방/체)",19,6,0,13],["대뿔(방/공)",19,0,6,13],["물뿔(체/공)",19,13,6,0],["물뿔(체/방)",19,13,0,6],["불뿔(공/방)",19,0,13,6],["불뿔(공/체)",19,6,13,0],["바뿔(공/체)",19,9,10,0],["바뿔(체/방)",19,10,0,9],["바뿔(공/방)",19,0,10,9],["악보",20,20,0,0],["황보",20,0,20,0],["여보",20,0,0,20],["바뿔(체/공)",20,10,10,0],["바뿔(체/방)",20,10,0,10],["바뿔(공/방)",20,0,10,10]];
+
+const RAW_ACCESSORY_DATA = [
+    ["크발", 0, 0, 0, 0], ["빛뿔공", 5, 0, 5, 0], ["빛뿔공", 8, 0, 8, 0],
+    ["악보", 16, 16, 0, 0], ["황보", 16, 0, 16, 0], ["여보", 16, 0, 0, 16], ["대뿔(방/체)", 16, 6, 0, 10], ["대뿔(방/공)", 16, 0, 6, 10], ["물뿔(체/공)", 16, 10, 6, 0], ["물뿔(체/방)", 16, 10, 0, 6], ["불뿔(공/방)", 16, 0, 10, 6], ["불뿔(공/체)", 16, 6, 10, 0], ["바뿔(공/체)", 16, 8, 8, 0], ["바뿔(체/방)", 16, 8, 0, 8], ["바뿔(공/방)", 16, 0, 8, 8],
+    ["악보", 17, 17, 0, 0], ["황보", 17, 0, 17, 0], ["여보", 17, 0, 0, 17], ["대뿔(방/체)", 17, 6, 0, 11], ["대뿔(방/공)", 17, 0, 6, 11], ["물뿔(체/공)", 17, 11, 6, 0], ["물뿔(체/방)", 17, 11, 0, 6], ["불뿔(공/방)", 17, 0, 11, 6], ["불뿔(공/체)", 17, 6, 11, 0], ["바뿔(공/체)", 17, 9, 8, 0], ["바뿔(체/방)", 17, 9, 0, 8], ["바뿔(공/방)", 17, 0, 9, 8],
+    ["악보", 18, 18, 0, 0], ["황보", 18, 0, 18, 0], ["여보", 18, 0, 0, 18], ["대뿔(방/체)", 18, 6, 0, 12], ["대뿔(방/공)", 18, 0, 6, 12], ["물뿔(체/공)", 18, 12, 6, 0], ["물뿔(체/방)", 18, 12, 0, 6], ["불뿔(공/방)", 18, 0, 12, 6], ["불뿔(공/체)", 18, 6, 12, 0], ["바뿔(공/체)", 18, 9, 9, 0], ["바뿔(체/방)", 18, 9, 0, 9], ["바뿔(공/방)", 18, 0, 9, 9],
+    ["악보", 19, 19, 0, 0], ["황보", 19, 0, 19, 0], ["여보", 19, 0, 0, 19], ["대뿔(방/체)", 19, 6, 0, 13], ["대뿔(방/공)", 19, 0, 6, 13], ["물뿔(체/공)", 19, 13, 6, 0], ["물뿔(체/방)", 19, 13, 0, 6], ["불뿔(공/방)", 19, 0, 13, 6], ["불뿔(공/체)", 19, 6, 13, 0], ["바뿔(공/체)", 19, 9, 10, 0], ["바뿔(체/방)", 19, 10, 0, 9], ["바뿔(공/방)", 19, 0, 10, 9],
+    ["악보", 20, 20, 0, 0], ["황보", 20, 0, 20, 0], ["여보", 20, 0, 0, 20], ["바뿔(체/공)", 20, 10, 10, 0], ["바뿔(체/방)", 20, 10, 0, 10], ["바뿔(공/방)", 20, 0, 10, 10]
+];
 const RAW_ACCESSORY_DB = RAW_ACCESSORY_DATA.map(d => ({ name: d[0], lv: d[1], hp: d[2] / 100, atk: d[3] / 100, def: d[4] / 100 })).sort((a, b) => b.lv - a.lv);
 const ACCESSORY_DB_EXPANDED = [];
 RAW_ACCESSORY_DB.forEach((acc) => { for (let k = 1; k <= 3; k++) ACCESSORY_DB_EXPANDED.push({ ...acc, id: `acc_${acc.name}_${acc.lv}_${k}`, instanceNum: k, use: false, enchants: { hp: true, atk: true, def: true } }); });
-const POTION_DB = { "기본(크/회/자)": { hp: 24, atk: 6, def: 6 } };
+
+const BASE_POTION = { hp: 24, atk: 6, def: 6 };
+const POTION_DB = { "기본(크/회/자)": BASE_POTION };
 for (let i = 1; i <= 8; i++) { POTION_DB[`체력 ${i}단계`] = { hp: 24 + (12 * i), atk: 6, def: 6 }; POTION_DB[`공격력 ${i}단계`] = { hp: 24, atk: 6 + (3 * i), def: 6 }; POTION_DB[`방어력 ${i}단계`] = { hp: 24, atk: 6, def: 6 + (3 * i) }; }
 const POTION_KEYS = ["기본(크/회/자)", ...Object.keys(POTION_DB).filter(k => k !== "기본(크/회/자)")];
 
 // ============================================================================
-// [2] 헬퍼 함수
+// [2] 헬퍼 함수 및 계산 로직
 // ============================================================================
+
 function safeFmt(val) {
     if (val === null || val === undefined || isNaN(val)) return "0";
     return Number(val).toLocaleString();
 }
-function normalizeNerf(n) { return (!n || n === "No Nerf") ? "너프 없음" : n; }
+
+function normalizeNerf(n) {
+    return (!n || n === "No Nerf") ? "너프 없음" : n;
+}
+
 function normalizeType(t) {
     if (!t) return "체";
     return t.replace("HP", "체").replace("ATK", "공").replace("DEF", "방")
         .replace("H/A", "체공").replace("H/D", "체방").replace("A/D", "공방");
 }
+
 function getBuffWeight(buffName) {
     if (!buffName || buffName === '0벞') return 0;
     if (buffName.includes("40%") || buffName.includes("+")) return 2;
     return 1;
 }
+
 function formatGemString(gems, lang = 'ko') {
     if (!gems || !Array.isArray(gems) || gems.length === 0) return lang === 'en' ? "No Gems" : "젬 없음";
     const sorted = [...gems].sort((a, b) => {
@@ -64,24 +105,27 @@ function formatGemString(gems, lang = 'ko') {
         return `${s} ${g.val}`;
     }).join(" ");
 }
+
 function convertSpiritToStats(inputs) {
     const pct = { hp: 0, atk: 0, def: 0 }; const flat = { hp: 0, atk: 0, def: 0 }; const sub = { hp: 0, atk: 0, def: 0 };
     if (!inputs || !Array.isArray(inputs)) return { pct, flat, sub };
     const SLOT_MAP = { "체력": 0, "공격력": 1, "방어력": 2 };
     inputs.forEach((row, i) => {
         if (!row || !row.stat) return;
+
         let statName = row.stat;
         if (i === 4) {
             if (statName.includes("체력")) statName = "체력";
             else if (statName.includes("공격력")) statName = "공격력";
             else if (statName.includes("방어력")) statName = "방어력";
         }
+
         const k = SLOT_MAP[statName];
         if (k !== undefined) {
             const statKey = k === 0 ? 'hp' : k === 1 ? 'atk' : 'def';
             if (i < 4) {
-                if (row.type === '+') flat[statKey] += (SPIRIT_FLAT_TBL[i+1] ? SPIRIT_FLAT_TBL[i+1][k] : 0);
-                else pct[statKey] += (SPIRIT_PCT_TBL[i+1] ? SPIRIT_PCT_TBL[i+1][k] : 0);
+                if (row.type === '+') flat[statKey] += (SPIRIT_FLAT_TBL[i + 1] ? SPIRIT_FLAT_TBL[i + 1][k] : 0);
+                else pct[statKey] += (SPIRIT_PCT_TBL[i + 1] ? SPIRIT_PCT_TBL[i + 1][k] : 0);
             } else {
                 if (statName === "체력") sub.hp += 40;
                 else if (statName === "공격력") sub.atk += 10;
@@ -91,6 +135,7 @@ function convertSpiritToStats(inputs) {
     });
     return { pct, flat, sub };
 }
+
 function formatSpirit(inputs, lang = 'ko') {
     if (!inputs || !Array.isArray(inputs) || inputs.length === 0) return "-";
     const mains = inputs.slice(0, 4).map((i) => {
@@ -101,6 +146,7 @@ function formatSpirit(inputs, lang = 'ko') {
     const sub = (inputs[4] && inputs[4].stat) ? (lang === 'en' ? (inputs[4].stat === '체력' ? 'H' : inputs[4].stat === '공격력' ? 'A' : 'D') : inputs[4].stat[0]) : "";
     return `${mains} ${sub}`.trim();
 }
+
 function translateAcc(name, lang) {
     if (lang !== 'en') return name;
     let out = name || "";
@@ -108,6 +154,7 @@ function translateAcc(name, lang) {
     out = out.replace("(체/공)", "(H/A)").replace("(공/체)", "(A/H)").replace("(체/방)", "(H/D)").replace("(방/체)", "(D/H)").replace("(방/공)", "(D/A)").replace("(공/방)", "(A/D)");
     return out;
 }
+
 function calculateTar(score, denom) {
     if (!denom) return 0;
     const r = score / denom;
@@ -524,23 +571,12 @@ export default function Home() {
         return Object.entries(g).sort((a,b)=>Number(b[0])-Number(a[0])); 
     }, [accInv]);
 
-    // [추가] gemCounts 복구
+    // [중요] 누락되었던 gemCounts 변수 정의
     const gemCounts = useMemo(() => {
         const c = { 체:0, 공:0, 방:0 };
         Object.entries(gems).forEach(([k, v]) => { const parts = k.split('_'); if(parts.length < 2) return; let type = parts[0]; if(type==='HP') type='체'; if(type==='ATK') type='공'; if(type==='DEF') type='방'; if(c[type] !== undefined) c[type] += Number(v); });
         return c;
     }, [gems]);
-
-    // [추가] t 함수 복구
-    const t = (k) => {
-        const dict = {
-            ko: { title: "⚔️ 길드전 셋팅 계산기 v21.3", env: "📅 환경 설정", col: "컬렉션", gem: "💎 젬 인벤토리", sp: "👻 공용 정령", pd: "🔮 펜던트", acc: "💍 장신구 인벤토리", calc: "🚀 통합 최적화 시작", loading: "⏳ 계산 중...", save: "저장", load: "불러오기", add: "+ 추가", reset: "초기화", total: "총합 비벨", avg: "평균 비벨", tar: "평균 TAR", bound: "🔒 귀속 정령", potion: "물약", nerf: "너프", all: "전체", off: "해제", lv: "레벨", toggle_buff: "버프 제외 수치 보기", reset_all: "⚠️ 데이터 초기화",
-            mode_avg: "⚖️ 평균 모드", mode_focus: "👑 몰아주기", prec_sfast: "🚀 초신속(1천)", prec_fast: "⚡ 신속(3천)", prec_mid: "⚖️ 중간(5천)", prec_high: "🎯 정확(5만)", prec_all: "♾️ 전수(무제한)" },
-            en: { title: "⚔️ Guild War Calculator v21.3", env: "📅 Settings", col: "Collection", gem: "💎 Gems", sp: "👻 Spirits", pd: "🔮 Pendants", acc: "💍 Accessories", calc: "🚀 Optimize", loading: "⏳ Calculating...", save: "Save", load: "Load", add: "+ Add", reset: "Reset", total: "Total Score", avg: "Avg Score", tar: "Avg TAR", bound: "🔒 Bound Spirit", potion: "Potion", nerf: "Nerf", all: "All", off: "Off", lv: "Lv", toggle_buff: "View Stats without Buffs", reset_all: "⚠️ Reset Data",
-            mode_avg: "⚖️ Average", mode_focus: "👑 Focus", prec_sfast: "🚀 S-Fast", prec_fast: "⚡ Fast", prec_mid: "⚖️ Mid", prec_high: "🎯 High", prec_all: "♾️ All" }
-        };
-        return dict[lang][k];
-    };
     
     const handleCalc = async () => {
         setIsCalculating(true); setResult(null); setTimer(0);
@@ -626,6 +662,17 @@ export default function Home() {
             localStorage.clear();
             window.location.reload();
         }
+    };
+
+    // [중요] 누락되었던 번역 함수 t 정의
+    const t = (k) => {
+        const dict = {
+            ko: { title: "⚔️ 길드전 셋팅 계산기 v21.3", env: "📅 환경 설정", col: "컬렉션", gem: "💎 젬 인벤토리", sp: "👻 공용 정령", pd: "🔮 펜던트", acc: "💍 장신구 인벤토리", calc: "🚀 통합 최적화 시작", loading: "⏳ 계산 중...", save: "저장", load: "불러오기", add: "+ 추가", reset: "초기화", total: "총합 비벨", avg: "평균 비벨", tar: "평균 TAR", bound: "🔒 귀속 정령", potion: "물약", nerf: "너프", all: "전체", off: "해제", lv: "레벨", toggle_buff: "버프 제외 수치 보기", reset_all: "⚠️ 데이터 초기화",
+            mode_avg: "⚖️ 평균 모드", mode_focus: "👑 몰아주기", prec_sfast: "🚀 초신속(1천)", prec_fast: "⚡ 신속(3천)", prec_mid: "⚖️ 중간(5천)", prec_high: "🎯 정확(5만)", prec_all: "♾️ 전수(무제한)" },
+            en: { title: "⚔️ Guild War Calculator v21.3", env: "📅 Settings", col: "Collection", gem: "💎 Gems", sp: "👻 Spirits", pd: "🔮 Pendants", acc: "💍 Accessories", calc: "🚀 Optimize", loading: "⏳ Calculating...", save: "Save", load: "Load", add: "+ Add", reset: "Reset", total: "Total Score", avg: "Avg Score", tar: "Avg TAR", bound: "🔒 Bound Spirit", potion: "Potion", nerf: "Nerf", all: "All", off: "Off", lv: "Lv", toggle_buff: "View Stats without Buffs", reset_all: "⚠️ Reset Data",
+            mode_avg: "⚖️ Average", mode_focus: "👑 Focus", prec_sfast: "🚀 S-Fast", prec_fast: "⚡ Fast", prec_mid: "⚖️ Mid", prec_high: "🎯 High", prec_all: "♾️ All" }
+        };
+        return dict[lang][k];
     };
 
     const onGemChange = (s, v, c) => {
