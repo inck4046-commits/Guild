@@ -3,6 +3,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from 'react';
+import Link from 'next/link';
 
 // ============================================================================
 // [1] 데이터 및 상수 (DB)
@@ -559,6 +560,7 @@ export default function Home() {
     const [accInv, setAccInv] = useState(ACCESSORY_DB_EXPANDED);
     const [tarSettings, setTarSettings] = useState({ collection: { hp: 240, atk: 60, def: 60 } });
     
+    // [상태 변수 복구]
     const [currentSlot, setCurrentSlot] = useState(1);
     const [calcMode, setCalcMode] = useState("avg");
     const [precMode, setPrecMode] = useState(3000);
@@ -569,10 +571,12 @@ export default function Home() {
     const [timer, setTimer] = useState(0);
     const timerRef = useRef(null);
 
+    // 순위표 관련 상태
     const [rankings, setRankings] = useState([]);
     const [showRankModal, setShowRankModal] = useState(false);
     const [selectedRankDetail, setSelectedRankDetail] = useState(null);
 
+    // 서버(KV)에서 랭킹 불러오기
     useEffect(() => {
         try { const s = localStorage.getItem('my_gems'); if(s) setGems(JSON.parse(s)); } catch(e){}
         fetch('/api/rank').then(r=>r.json()).then(setRankings).catch(()=>{});
@@ -738,12 +742,33 @@ export default function Home() {
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4">
                 <div className="lg:col-span-3 space-y-3">
                     {dragons.map((d, i) => (
-                        <div key={i} className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700 relative"><button onClick={()=>removeDragon(i)} className="absolute top-2 right-2 text-red-500 text-[10px]">🗑️</button><div className="flex justify-between mb-2 font-bold text-indigo-400 text-sm">{t('dragon')} {i+1}<input type="checkbox" checked={d.use} onChange={e=>{const n=[...dragons];n[i].use=e.target.checked;setDragons(n)}} className="ml-2"/></div><div className="space-y-1 mb-2"><div className="flex gap-1 mb-1"><select className="bg-[#111827] text-xs p-1 rounded w-full" value={d.typ} onChange={e=>updateDragon(i, 'typ', e.target.value)}>{DRAGON_TYPES.map(t=><option key={t}>{lang==='en'?t.replace('체','HP').replace('공','ATK').replace('방','DEF').replace('H/A','H/A').replace('H/D','H/D').replace('A/D','A/D'):t}</option>)}</select><select className="bg-[#111827] text-xs p-1 rounded w-full" value={d.grade} onChange={e=>updateDragon(i, 'grade', e.target.value)} disabled={d.typ.includes("(진각)")}>{GRADES.map(g=><option key={g}>{g}</option>)}</select></div><div className="flex gap-1 mb-1"><select className="bg-[#111827] text-xs p-1 rounded w-full text-green-400" value={d.buff} onChange={e=>updateDragon(i, 'buff', e.target.value)}>{Object.keys(BUFFS_DB).map(b=><option key={b}>{b}</option>)}</select><select className="bg-[#111827] text-xs p-1 rounded w-full text-red-400" value={d.nerfKey} onChange={e=>updateDragon(i, 'nerfKey', e.target.value)}>{ALL_NERFS.map(n=><option key={n} value={n}>{n==='너프 없음'&&lang==='en'?'No Nerf':n}</option>)}</select></div><select className="bg-[#111827] text-xs p-1 rounded w-full text-pink-300" value={d.potionName} onChange={e=>updateDragon(i, 'potionName', e.target.value)}>{POTION_KEYS.map(p=><option key={p} value={p}>{lang==='en'?p.replace('기본(크/회/자)', 'Crit/Eva/Tonic').replace('단계','Lv').replace('체력','HP').replace('공격력','ATK').replace('방어력','DEF'):p}</option>)}</select></div><div className="bg-[#111827] p-2 rounded mt-2"><div className="flex justify-between items-center mb-1"><span className="text-[10px] text-pink-400 font-bold">{t('bound')}</span><input type="checkbox" checked={d.boundSpirit.use} onChange={()=>{const n=[...dragons];n[i].boundSpirit.use=!n[i].boundSpirit.use;setDragons(n)}} /></div>{d.boundSpirit.use && <div className="space-y-0.5">{d.boundSpirit.input.map((r, ri) => (<div key={ri} className="flex gap-1"><select className="bg-[#252a37] text-[8px] p-0.5 rounded flex-1" value={r?.stat || '체력'} onChange={e=>{const n=[...dragons];if(n[i].boundSpirit.input[ri]) n[i].boundSpirit.input[ri].stat=e.target.value;setDragons(n)}}>{ri<4?SPIRIT_STATS.map(t=><option key={t}>{lang==='en'?t.replace('체력','HP').replace('공격력','ATK').replace('방어력','DEF'):t}</option>):["체력40","공격력10","방어력10"].map(t=><option key={t}>{t}</option>)}</select>{ri < 4 && <select className="bg-[#252a37] text-[8px] p-0.5 rounded w-8" value={r?.type || '%'} onChange={e=>{const n=[...dragons];if(n[i].boundSpirit.input[ri]) n[i].boundSpirit.input[ri].type=e.target.value;setDragons(n)}}>{SPIRIT_MODES.map(t=><option key={t}>{t}</option>)}</select>}</div>))}</div>}</div></div>
+                        <div key={i} className="bg-[#1b1f2b] p-4 rounded-xl border border-slate-700">
+                            <div className="flex justify-between mb-3 font-bold text-indigo-400">드래곤 {i+1} <input type="checkbox" checked={d.use} onChange={e=>{const n=[...dragons];n[i].use=e.target.checked;setDragons(n)}}/></div>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                <select className="bg-[#111827] p-2 rounded" value={d.typ} onChange={e=>updateDragon(i, 'typ', e.target.value)}>{DRAGON_TYPES.map(t=><option key={t}>{t}</option>)}</select>
+                                <select className="bg-[#111827] p-2 rounded" value={d.grade} onChange={e=>updateDragon(i, 'grade', e.target.value)} disabled={d.typ.includes("(진각)")}>{GRADES.map(g=><option key={g}>{g}</option>)}</select>
+                                <select className="bg-[#111827] p-2 rounded text-green-400" value={d.buff} onChange={e=>updateDragon(i, 'buff', e.target.value)}>{TAR_BUFFS.map(b=><option key={b}>{b}</option>)}</select>
+                                <select className="bg-[#111827] p-2 rounded text-red-400" value={d.nerfKey} onChange={e=>updateDragon(i, 'nerfKey', e.target.value)}>{ALL_NERFS.map(n=><option key={n}>{n}</option>)}</select>
+                            </div>
+                        </div>
                     ))}
                 </div>
 
                 <div className="lg:col-span-5 space-y-4">
-                    <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700"><div className="flex justify-between items-center mb-2"><div className="text-xs font-bold text-slate-400">{t('gem')}</div><div className="flex gap-3 text-[10px]"><span className={gemCounts.체 > 15 ? "text-red-500" : "text-indigo-400"}>HP {gemCounts.체}/15</span><span className={gemCounts.공 > 15 ? "text-red-500" : "text-indigo-400"}>ATK {gemCounts.공}/15</span><span className={gemCounts.방 > 15 ? "text-red-500" : "text-indigo-400"}>DEF {gemCounts.방}/15</span></div></div><div className="grid grid-cols-7 gap-1">{GEM_VALUES.map(v => (<div key={v} className="flex flex-col gap-1"><span className="text-[9px] text-center text-slate-600">{v}</span>{GEM_STATS.map(s => (<input key={s} type="number" className="bg-[#111827] text-center text-[9px] p-1 rounded outline-none" placeholder={lang==='en'?(s==='체'?'HP':s==='공'?'ATK':'DEF'):s} value={gems[`${s==='HP'||s==='체'?'체':s==='ATK'||s==='공'?'공':'방'}_${v}`]||''} onChange={e=>onGemChange(s,v,e.target.value)}/>))}</div>))}</div></div>
+                    <div className="bg-[#1b1f2b] p-4 rounded-xl border border-slate-700">
+                        <div className="text-xs font-bold text-slate-400 mb-3 uppercase">💎 Gem Inventory</div>
+                        <div className="grid grid-cols-7 gap-2">
+                            {GEM_VALUES.map(v => (
+                                <div key={v} className="flex flex-col gap-1">
+                                    <span className="text-[10px] text-center text-slate-500 font-mono">{v}</span>
+                                    {GEM_STATS.map(s => (
+                                        <input key={s} type="number" className="bg-[#111827] text-center text-xs p-1 rounded border border-slate-800 outline-none focus:border-indigo-500" 
+                                               value={gems[`${s}_${v}`] || ''} onChange={e=>onGemChange(s,v,e.target.value)} placeholder={s}/>
+                                    ))}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                     
                     {/* 정령 UI */}
                     <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-green-400">{t('sp')}</span><button onClick={()=>setSpirits([...spirits, createDefaultSpirit(spirits.length)])} className="text-[10px] bg-slate-700 px-2 rounded">{t('add')}</button></div><div className="h-40 overflow-y-auto space-y-1 custom-scrollbar">{spirits.map((s, i) => (<div key={i} className="bg-[#252a37] p-1 rounded flex gap-0.5 items-center"><span className="text-[9px] w-3">{i+1}</span>{s.input.map((r, ri) => (<div key={ri} className="flex-1"><select className={`w-full bg-[#111827] text-[8px] p-0.5 rounded ${ri===4?'text-yellow-500':''}`} value={r?.stat || '체력'} onChange={e=>{const n=[...spirits];if(n[i].input[ri]) n[i].input[ri].stat=e.target.value;setSpirits(n)}}>{ri<4?SPIRIT_STATS.map(t=><option key={t}>{lang==='en'?t.replace('체력','HP').replace('공격력','ATK').replace('방어력','DEF'):t}</option>):["체력40","공격력10","방어력10"].map(t=><option key={t}>{t}</option>)}</select>{ri < 4 && <select className="w-full bg-[#111827] text-[8px] p-0.5 rounded text-center mt-0.5" value={r?.type || '%'} onChange={e=>{const n=[...spirits];if(n[i].input[ri]) n[i].input[ri].type=e.target.value;setSpirits(n)}}>{SPIRIT_MODES.map(t=><option key={t}>{t}</option>)}</select>}</div>))}<button onClick={()=>setSpirits(spirits.filter((_,x)=>x!==i))} className="text-red-500 text-[10px] px-1">x</button></div>))}</div></div>
