@@ -493,13 +493,10 @@ export default function Home() {
         }).catch(()=>{});
     };
 
-    const exportResult = () => {
+const exportResult = async () => {
         if(!result) return;
         const nickname = prompt("해당 결과를 내보내시겠습니까?\n닉네임을 입력해주세요.");
         if(!nickname) return;
-
-        const existingIndex = rankings.findIndex(r => r.nickname === nickname);
-        if(existingIndex !== -1 && !confirm("이미 등록된 닉네임입니다. 덮어씌우시겠습니까?")) return;
 
         const avgScore = Math.round(result.totalScore / 3);
         const avgTar = result.combination.reduce((a, b) => a + b.tar, 0) / 3;
@@ -515,16 +512,37 @@ export default function Home() {
             date: new Date().toLocaleString() 
         };
         
-        let nextRanks = [...rankings];
-        if (existingIndex !== -1) {
-            nextRanks[existingIndex] = newRank;
-        } else {
-            nextRanks.push(newRank);
+        try {
+            // [핵심 변경] 저장하기 직전에 서버에서 가장 최신 데이터를 다시 불러옵니다!
+            const res = await fetch('/api/rank');
+            const latestRankings = await res.json();
+            
+            // 불러온 최신 데이터에 내 기록을 추가합니다.
+            let nextRanks = [...(Array.isArray(latestRankings) ? latestRankings : [])];
+            const existingIndex = nextRanks.findIndex(r => r.nickname === nickname);
+            
+            if (existingIndex !== -1) {
+                if(!confirm("이미 등록된 닉네임입니다. 덮어씌우시겠습니까?")) return;
+                nextRanks[existingIndex] = newRank; // 기존 닉네임 업데이트
+            } else {
+                nextRanks.push(newRank); // 새 닉네임 추가
+            }
+            
+            // 점수 순으로 정렬
+            nextRanks.sort((a,b) => b.totalScore - a.totalScore);
+            
+            // 화면과 서버에 동시에 업데이트
+            setRankings(nextRanks);
+            await fetch('/api/rank', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(nextRanks)
+            });
+            
+            alert("순위표에 안전하게 등록되었습니다.");
+        } catch (error) {
+            alert("순위표 등록 중 오류가 발생했습니다.");
         }
-        
-        nextRanks.sort((a,b) => b.totalScore - a.totalScore);
-        updateServer(nextRanks);
-        alert("순위표에 등록되었습니다.");
     };
 
     const openRankings = () => {
