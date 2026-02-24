@@ -499,8 +499,8 @@ const exportResult = async () => {
         if(!nickname) return;
 
         const avgScore = Math.round(result.totalScore / 3);
-        const avgTar = result.combination.reduce((a, b) => a + b.tar, 0) / 3;
-        const totalBuffs = result.combination.reduce((sum, item) => sum + getBuffWeight(item.dragon.buff), 0);
+        const avgTar = result.combination.reduce((a, b) => a + (b ? b.tar : 0), 0) / 3;
+        const totalBuffs = result.combination.reduce((sum, item) => sum + (item ? getBuffWeight(item.dragon.buff) : 0), 0);
 
         const newRank = { 
             nickname, 
@@ -513,25 +513,22 @@ const exportResult = async () => {
         };
         
         try {
-            // [핵심 변경] 저장하기 직전에 서버에서 가장 최신 데이터를 다시 불러옵니다!
+            // [핵심] 덮어쓰기 방지: 저장하기 0.1초 전에 서버에서 남들이 올린 최신 데이터를 불러옵니다.
             const res = await fetch('/api/rank');
             const latestRankings = await res.json();
             
-            // 불러온 최신 데이터에 내 기록을 추가합니다.
             let nextRanks = [...(Array.isArray(latestRankings) ? latestRankings : [])];
             const existingIndex = nextRanks.findIndex(r => r.nickname === nickname);
             
             if (existingIndex !== -1) {
                 if(!confirm("이미 등록된 닉네임입니다. 덮어씌우시겠습니까?")) return;
-                nextRanks[existingIndex] = newRank; // 기존 닉네임 업데이트
+                nextRanks[existingIndex] = newRank;
             } else {
-                nextRanks.push(newRank); // 새 닉네임 추가
+                nextRanks.push(newRank);
             }
             
-            // 점수 순으로 정렬
             nextRanks.sort((a,b) => b.totalScore - a.totalScore);
             
-            // 화면과 서버에 동시에 업데이트
             setRankings(nextRanks);
             await fetch('/api/rank', {
                 method: 'POST',
