@@ -247,7 +247,7 @@ async function optimizeFocusMode(dragons, gemData, inv, tarSettings, limit = 300
                 }
             }
             cands.sort((a, b) => b.approxScore - a.approxScore);
-            const topCands = cands.slice(0, limit);
+            const topCands = limit === Infinity ? cands : cands.slice(0, limit);
 
             for (const cand of topCands) {
                 for (const dist of GEM_DISTS) {
@@ -340,10 +340,6 @@ async function* optimizeAverageMode(dragons, gemData, inv, tarSettings, limit = 
             }
             cands.sort((a, b) => b.approxScore - a.approxScore);
             const topCands = limit === Infinity ? cands : cands.slice(0, limit);
-            if (limit !== Infinity) {
-                const fallback = cands.find(c => c.pd.id === 'none');
-                if (fallback && !topCands.includes(fallback)) topCands.push(fallback);
-            }
             candidatesPerSlot.push(topCands);
         }
 
@@ -436,10 +432,10 @@ export default function Home() {
     const [result, setResult] = useState(null);
     const [isCalculating, setIsCalculating] = useState(false);
     const [timer, setTimer] = useState(0);
-    const timerRef = useRef(null);
 
     const [rankings, setRankings] = useState([]);
     const [showRankModal, setShowRankModal] = useState(false);
+    const [isRankAdminMode, setIsRankAdminMode] = useState(false); // [추가] 관리자 모드 여부
     const [selectedRankDetail, setSelectedRankDetail] = useState(null);
 
     useEffect(() => {
@@ -454,15 +450,19 @@ export default function Home() {
 
     const gemCounts = useMemo(() => {
         const c = { 체:0, 공:0, 방:0 };
-        Object.entries(gems).forEach(([k, v]) => { const parts = k.split('_'); if(parts.length < 2) return; let type = parts[0]; if(type==='HP') type='체'; if(type==='ATK') type='공'; if(type==='DEF') type='방'; if(c[type] !== undefined) c[type] += Number(v); });
+        Object.entries(gems).forEach(([k, v]) => { 
+            const parts = k.split('_'); if(parts.length < 2) return; 
+            let type = parts[0]; if(type==='HP') type='체'; if(type==='ATK') type='공'; if(type==='DEF') type='방'; 
+            if(c[type] !== undefined) c[type] += Number(v); 
+        });
         return c;
     }, [gems]);
 
     const t = (k) => {
         const dict = {
-            ko: { title: "⚔️ 길드전 셋팅 계산기 v21.3", env: "📅 환경 설정", col: "컬렉션", gem: "💎 젬 인벤토리", sp: "👻 공용 정령", pd: "🔮 펜던트", acc: "💍 장신구 인벤토리", calc: "🚀 통합 최적화 시작", loading: "⏳ 계산 중...", save: "저장", load: "불러오기", add: "+ 추가", reset: "초기화", total: "총합 비벨", avg: "평균 비벨", tar: "평균 TAR", bound: "🔒 귀속 정령", potion: "물약", nerf: "너프", all: "전체", off: "해제", lv: "레벨", toggle_buff: "버프 제외 수치 보기", reset_all: "⚠️ 데이터 초기화",
+            ko: { title: "⚔️ 길드전 셋팅 계산기 v21.3", env: "📅 환경 설정", col: "컬렉션", gem: "💎 젬 인벤토리", sp: "👻 공용 정령", pd: "🔮 펜던트", acc: "💍 장신구 인벤토리", calc: "🚀 통합 최적화 시작", loading: "⏳ 계산 중...", save: "저장", load: "불러오기", add: "+ 추가", reset: "초기화", total: "총합 비벨", avg: "평균 비벨", tar: "평균 TAR", bound: "🔒 귀속 정령", potion: "물약", nerf: "너프", all: "전체", off: "해제", lv: "레벨", toggle_buff: "버프 제외 수치 보기", reset_all: "⚠️ 데이터 초기화", dragon: "드래곤",
             mode_avg: "⚖️ 평균 모드", mode_focus: "👑 몰아주기", prec_sfast: "🚀 초신속(1천)", prec_fast: "⚡ 신속(3천)", prec_mid: "⚖️ 중간(5천)", prec_high: "🎯 정확(5만)", prec_all: "♾️ 전수(무제한)" },
-            en: { title: "⚔️ Guild War Calculator v21.3", env: "📅 Settings", col: "Collection", gem: "💎 Gems", sp: "👻 Spirits", pd: "🔮 Pendants", acc: "💍 Accessories", calc: "🚀 Optimize", loading: "⏳ Calculating...", save: "Save", load: "Load", add: "+ Add", reset: "Reset", total: "Total Score", avg: "Avg Score", tar: "Avg TAR", bound: "🔒 Bound Spirit", potion: "Potion", nerf: "Nerf", all: "All", off: "Off", lv: "Lv", toggle_buff: "View Stats without Buffs", reset_all: "⚠️ Reset Data",
+            en: { title: "⚔️ Guild War Calculator v21.3", env: "📅 Settings", col: "Collection", gem: "💎 Gems", sp: "👻 Spirits", pd: "🔮 Pendants", acc: "💍 Accessories", calc: "🚀 Optimize", loading: "⏳ Calculating...", save: "Save", load: "Load", add: "+ Add", reset: "Reset", total: "Total Score", avg: "Avg Score", tar: "Avg TAR", bound: "🔒 Bound Spirit", potion: "Potion", nerf: "Nerf", all: "All", off: "Off", lv: "Lv", toggle_buff: "View Stats without Buffs", reset_all: "⚠️ Reset Data", dragon: "Dragon",
             mode_avg: "⚖️ Average", mode_focus: "👑 Focus", prec_sfast: "🚀 S-Fast", prec_fast: "⚡ Fast", prec_mid: "⚖️ Mid", prec_high: "🎯 High", prec_all: "♾️ All" }
         };
         return dict[lang][k];
@@ -476,7 +476,7 @@ export default function Home() {
                 const res = await optimizeFocusMode(dragons, gems, { accessories: accInv, spirits, pendants }, tarSettings, precMode, lang);
                 setResult(res);
             } else {
-                const gen = optimizeAverageMode(dragons, gems, { accessories: accInv, spirits, pendants }, tarSettings, precMode, 'ko');
+                const gen = optimizeAverageMode(dragons, gems, { accessories: accInv, spirits, pendants }, tarSettings, precMode, lang);
                 for await (const res of gen) { setResult(res); }
             }
         } catch (e) { console.error(e); alert("Error: " + e.message); } finally { 
@@ -484,23 +484,17 @@ export default function Home() {
         }
     };
 
-    const updateServer = (newRankings) => {
-        setRankings(newRankings);
-        fetch('/api/rank', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(newRankings)
-        }).catch(()=>{});
-    };
-
-const exportResult = async () => {
+    const exportResult = async () => {
         if(!result) return;
         const nickname = prompt("해당 결과를 내보내시겠습니까?\n닉네임을 입력해주세요.");
         if(!nickname) return;
 
-        const avgScore = Math.round(result.totalScore / 3);
-        const avgTar = result.combination.reduce((a, b) => a + (b ? b.tar : 0), 0) / 3;
-        const totalBuffs = result.combination.reduce((sum, item) => sum + (item ? getBuffWeight(item.dragon.buff) : 0), 0);
+        const validCombs = result.combination.filter(x => x);
+        const len = validCombs.length || 1;
+
+        const avgScore = Math.round(result.totalScore / len);
+        const avgTar = validCombs.reduce((a, b) => a + b.tar, 0) / len;
+        const totalBuffs = validCombs.reduce((sum, item) => sum + (item ? getBuffWeight(item.dragon.buff) : 0), 0);
 
         const newRank = { 
             nickname, 
@@ -513,7 +507,6 @@ const exportResult = async () => {
         };
         
         try {
-            // [핵심] 덮어쓰기 방지: 저장하기 0.1초 전에 서버에서 남들이 올린 최신 데이터를 불러옵니다.
             const res = await fetch('/api/rank');
             const latestRankings = await res.json();
             
@@ -542,38 +535,42 @@ const exportResult = async () => {
         }
     };
 
-    const openRankings = () => {
-        const pw = prompt("비밀번호를 입력하세요.");
-        if(pw === "5454") setShowRankModal(true);
-        else alert("비밀번호가 틀렸습니다.");
+    // [추가] 일반 길드원 조회용 모드 열기
+    const openViewRankings = () => {
+        setIsRankAdminMode(false);
+        setShowRankModal(true);
     };
 
-    const deleteRanking = (index) => {
+    // [변경] 기존 버튼은 관리자 모드로
+    const openAdminRankings = () => {
+        const pw = prompt("관리자 비밀번호를 입력하세요.");
+        if(pw === "5454") {
+            setIsRankAdminMode(true);
+            setShowRankModal(true);
+        } else {
+            alert("비밀번호가 틀렸습니다.");
+        }
+    };
+
+    const deleteRanking = async (index) => {
         if(!confirm("이 기록을 삭제하시겠습니까?")) return;
         const nextRanks = rankings.filter((_, i) => i !== index);
-        updateServer(nextRanks);
+        setRankings(nextRanks);
+        await fetch('/api/rank', { method: 'POST', body: JSON.stringify(nextRanks) });
     };
 
-    const clearRankings = () => {
+    const clearRankings = async () => {
         if(!confirm("정말로 모든 순위표 데이터를 삭제하시겠습니까?")) return;
-        updateServer([]);
+        setRankings([]);
+        await fetch('/api/rank', { method: 'POST', body: JSON.stringify([]) });
     };
 
     const savePreset = (slot) => { if(confirm(`${slot} Save?`)) { const data = { dragons, spirits, pendants, accInv, tarSettings }; localStorage.setItem(`gw_preset_${slot}`, JSON.stringify(data)); alert("Saved."); } };
     const loadPreset = (slot) => { if(confirm(`${slot} Load?`)) { const d = localStorage.getItem(`gw_preset_${slot}`); if(d) { const p = JSON.parse(d); if(p.dragons) setDragons(p.dragons); if(p.spirits) setSpirits(p.spirits); if(p.pendants) setPendants(p.pendants); if(p.accInv) setAccInv(p.accInv); if(p.tarSettings) setTarSettings(p.tarSettings); } else { alert("No Data."); } } };
 
-    const resetAllData = () => {
-        if (confirm("정말로 모든 데이터를 초기화하시겠습니까? (저장된 프리셋 포함)")) {
-            localStorage.clear();
-            window.location.reload();
-        }
-    };
+    const resetAllData = () => { if (confirm("초기화?")) { localStorage.clear(); window.location.reload(); } };
 
-    const onGemChange = (s, v, c) => {
-        const next = { ...gems, [`${s}_${v}`]: Number(c) };
-        setGems(next); localStorage.setItem('my_gems', JSON.stringify(next));
-    };
-
+    const onGemChange = (s, v, c) => { const next = { ...gems, [`${s}_${v}`]: Number(c) }; setGems(next); localStorage.setItem('my_gems', JSON.stringify(next)); };
     const updateDragon = (idx, field, val) => { const n = [...dragons]; n[idx][field] = val; if(field==='potionName') n[idx].potion = POTION_DB[val]; setDragons(n); };
     const toggleAcc = (id) => setAccInv(accInv.map(a => a.id === id ? { ...a, use: !a.use } : a));
     const toggleEnchant = (id, type) => setAccInv(accInv.map(a => a.id === id ? { ...a, enchants: { ...a.enchants, [type]: !a.enchants[type] } } : a));
@@ -589,7 +586,11 @@ const exportResult = async () => {
                         ← 메인으로
                     </Link>
                     <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">{t('title')}</h1>
-                    <button onClick={openRankings} className="bg-amber-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-amber-500 transition shadow-lg">🏆 비벨 순위표 보기</button>
+                    {/* [변경] 조회용 버튼과 관리자용 버튼을 따로 분리 */}
+                    <div className="flex gap-2">
+                        <button onClick={openViewRankings} className="bg-emerald-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-emerald-500 transition shadow-lg">📊 순위표 (조회용)</button>
+                        <button onClick={openAdminRankings} className="bg-amber-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-amber-500 transition shadow-lg">⚙️ 관리자</button>
+                    </div>
                 </div>
                 <div className="flex flex-col items-end gap-2">
                     <button onClick={()=>setLang(lang==='ko'?'en':'ko')} className="text-xs bg-slate-700 px-2 py-1 rounded text-white hover:bg-slate-600">{lang==='ko'?'🇺🇸 English':'🇰🇷 한국어'}</button>
@@ -628,24 +629,20 @@ const exportResult = async () => {
                 <div className="lg:col-span-5 space-y-4">
                     <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700"><div className="flex justify-between items-center mb-2"><div className="text-xs font-bold text-slate-400">{t('gem')}</div><div className="flex gap-3 text-[10px]"><span className={gemCounts.체 > 15 ? "text-red-500" : "text-indigo-400"}>HP {gemCounts.체}/15</span><span className={gemCounts.공 > 15 ? "text-red-500" : "text-indigo-400"}>ATK {gemCounts.공}/15</span><span className={gemCounts.방 > 15 ? "text-red-500" : "text-indigo-400"}>DEF {gemCounts.방}/15</span></div></div><div className="grid grid-cols-7 gap-1">{GEM_VALUES.map(v => (<div key={v} className="flex flex-col gap-1"><span className="text-[9px] text-center text-slate-600">{v}</span>{GEM_STATS.map(s => (<input key={s} type="number" className="bg-[#111827] text-center text-[9px] p-1 rounded outline-none" placeholder={lang==='en'?(s==='체'?'HP':s==='공'?'ATK':'DEF'):s} value={gems[`${s==='HP'||s==='체'?'체':s==='ATK'||s==='공'?'공':'방'}_${v}`]||''} onChange={e=>onGemChange(s,v,e.target.value)}/>))}</div>))}</div></div>
                     
-                    {/* 정령 UI */}
                     <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-green-400">{t('sp')}</span><button onClick={()=>setSpirits([...spirits, createDefaultSpirit(Date.now())])} className="text-[10px] bg-slate-700 px-2 rounded">{t('add')}</button></div><div className="h-40 overflow-y-auto space-y-1 custom-scrollbar">{spirits.map((s, i) => (<div key={s.id} className="bg-[#252a37] p-1 rounded flex gap-0.5 items-center"><span className="text-[9px] w-3">{i+1}</span>{s.input.map((r, ri) => (<div key={ri} className="flex-1"><select className={`w-full bg-[#111827] text-[8px] p-0.5 rounded ${ri===4?'text-yellow-500':''}`} value={r?.stat || '체력'} onChange={e=>{const n=[...spirits];if(n[i].input[ri]) n[i].input[ri].stat=e.target.value;setSpirits(n)}}>{ri<4?SPIRIT_STATS.map(t=><option key={t}>{lang==='en'?t.replace('체력','HP').replace('공격력','ATK').replace('방어력','DEF'):t}</option>):["체력40","공격력10","방어력10"].map(t=><option key={t}>{t}</option>)}</select>{ri < 4 && <select className="w-full bg-[#111827] text-[8px] p-0.5 rounded text-center mt-0.5" value={r?.type || '%'} onChange={e=>{const n=[...spirits];if(n[i].input[ri]) n[i].input[ri].type=e.target.value;setSpirits(n)}}>{SPIRIT_MODES.map(t=><option key={t}>{t}</option>)}</select>}</div>))}<button onClick={()=>setSpirits(spirits.filter((_,x)=>x!==i))} className="text-red-500 text-[10px] px-1">x</button></div>))}</div></div>
                     
-                    {/* 펜던트 UI */}
                     <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700"><div className="flex justify-between mb-2"><span className="text-xs font-bold text-pink-400">{t('pd')}</span><button onClick={()=>setPendants([...pendants, createDefaultPendant(Date.now())])} className="text-[10px] bg-slate-700 px-2 rounded">{t('add')}</button></div><div className="h-32 overflow-y-auto space-y-1 custom-scrollbar">{pendants.map((p, i) => (<div key={p.id} className="bg-[#252a37] p-1 rounded flex gap-1 items-center"><span className="text-[9px] w-3">{i+1}</span>{['hp','atk','def'].map(k => (<div key={k} className="flex-1 flex items-center bg-[#111827] rounded px-1"><span className={`text-[8px] mr-1 ${k==='hp'?'text-red-400':k==='atk'?'text-blue-400':'text-green-400'}`}>{k.toUpperCase()}</span><input type="number" className="w-full bg-transparent text-[10px] text-right outline-none" value={p.pct[k]*100} onChange={e=>{const n=[...pendants];n[i].pct[k]=Number(e.target.value)/100;setPendants(n)}}/></div>))}<button onClick={()=>setPendants(pendants.filter((_,x)=>x!==i))} className="text-red-500 text-[10px] px-1">x</button></div>))}</div></div>
                 </div>
 
                 <div className="lg:col-span-4 space-y-4">
-                    {/* 장신구 UI */}
                     <div className="bg-[#1b1f2b] p-3 rounded-xl border border-slate-700 h-[400px] flex flex-col"><div className="text-xs font-bold text-slate-300 mb-2">{t('acc')}</div><div className="flex-1 overflow-y-auto custom-scrollbar space-y-1">{groupedAccs.map(([lv, list]) => (<details key={lv} className="group bg-[#111827] rounded border border-slate-800"><summary className="flex justify-between items-center p-2 bg-[#1e2532] cursor-pointer select-none"><span className="text-[10px] font-bold">{lv} {t('lv')} ({list.length})</span><div className="flex gap-1" onClick={e=>e.preventDefault()}><button onClick={()=>toggleLevel(lv, true)} className="text-[8px] bg-indigo-600 px-1 rounded text-white">{t('all')}</button><button onClick={()=>toggleLevel(lv, false)} className="text-[8px] bg-slate-600 px-1 rounded text-white">{t('off')}</button></div></summary><div className="p-1 space-y-1">{list.map(acc => (<div key={acc.id} className={`p-1 rounded text-[9px] border flex justify-between items-center ${acc.use ? 'bg-indigo-900/50 border-indigo-500' : 'bg-[#1b1f2b] border-slate-700'}`}><div className="flex items-center gap-2 cursor-pointer flex-1" onClick={()=>toggleAcc(acc.id)}><span className={acc.use ? 'text-white' : 'text-slate-500'}>{translateAcc(acc.name, lang)}</span><span className="text-slate-600">#{acc.instanceNum}</span></div><div className="flex gap-1" onClick={e=>e.stopPropagation()}>{['hp','atk','def'].map(s => (<label key={s} className={`flex items-center justify-center w-4 h-4 cursor-pointer rounded ${acc.enchants[s] ? 'bg-slate-600 text-white' : 'bg-slate-900 text-slate-600'}`}><input type="checkbox" className="hidden" checked={acc.enchants[s]} onChange={()=>toggleEnchant(acc.id, s)}/>{s.toUpperCase()[0]}</label>))}</div></div>))}</div></details>))}</div></div>
                     
-                    <button onClick={handleCalc} disabled={isCalculating} className={`w-full py-4 rounded-xl shadow-lg font-bold transition-all flex justify-center items-center gap-2 ${isCalculating ? 'bg-slate-700 cursor-not-allowed text-slate-400' : 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:opacity-90'}`}>{isCalculating ? (<><span className="animate-spin text-xl">⏳</span><span>{t('loading')} {timer.toFixed(1)}s</span></>) : t('calc')}</button>
+                    <button onClick={handleCalc} disabled={isCalculating} className={`w-full py-4 rounded-xl shadow-lg font-bold transition-all flex justify-center items-center gap-2 ${isCalculating ? 'bg-slate-700 cursor-not-allowed text-slate-400' : 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white hover:opacity-90'}`}>{isCalculating ? (<><span className="animate-spin text-xl">⏳</span><span>{t('loading')}</span></>) : t('calc')}</button>
+                    
                     <div className="bg-[#1b1f2b] p-4 rounded-xl border border-slate-700 min-h-[300px]">
                         {result && (
                             <div className="flex justify-between items-center mb-2">
-                                <div className="flex gap-1">
-                                    <button onClick={exportResult} className="text-[10px] bg-emerald-600 px-3 py-1 rounded text-white font-bold hover:bg-emerald-500 transition">📤 결과 내보내기</button>
-                                </div>
+                                <button onClick={exportResult} className="text-[10px] bg-emerald-600 px-3 py-1 rounded text-white font-bold hover:bg-emerald-500 transition">📤 결과 내보내기</button>
                                 <button onClick={() => setShowNoBuff(!showNoBuff)} className={`text-[10px] px-2 py-1 rounded border ${showNoBuff ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-slate-700 border-slate-500 text-slate-300'}`}>{t('toggle_buff')}</button>
                             </div>
                         )}
@@ -670,11 +667,13 @@ const exportResult = async () => {
                                 <div className="col-span-1">평균 TAR</div>
                                 <div className="col-span-1">총 벞</div>
                                 <div className="col-span-2 text-right">등록일</div>
-                                <div className="col-span-1 text-center">삭제</div>
+                                {/* [변경] 관리자일 때만 삭제 헤더 표시 */}
+                                <div className="col-span-1 text-center">{isRankAdminMode ? '삭제' : ''}</div>
                             </div>
                             {rankings.map((r, idx) => (
-                                <div key={idx} onDoubleClick={()=>setSelectedRankDetail(r)} 
-                                     className="grid grid-cols-12 items-center bg-[#111827] p-3 rounded-xl border border-slate-800 hover:border-indigo-500 transition cursor-pointer group text-center text-xs">
+                                {/* [변경] 관리자일 때만 더블클릭 이벤트(상세보기) 활성화 */}
+                                <div key={idx} onDoubleClick={() => { if(isRankAdminMode) setSelectedRankDetail(r); }} 
+                                     className={`grid grid-cols-12 items-center bg-[#111827] p-3 rounded-xl border border-slate-800 transition group text-center text-xs ${isRankAdminMode ? 'cursor-pointer hover:border-indigo-500' : 'cursor-default'}`}>
                                     <div className="col-span-1 font-mono font-bold text-slate-500 group-hover:text-white">{idx+1}</div>
                                     <div className="col-span-2 font-bold text-slate-200 text-left truncate">{r.nickname}</div>
                                     <div className="col-span-2 font-black text-orange-400">{safeFmt(r.totalScore)}</div>
@@ -682,16 +681,21 @@ const exportResult = async () => {
                                     <div className="col-span-1 font-bold text-cyan-400">{r.avgTar ? r.avgTar.toFixed(2) : '0.00'}%</div>
                                     <div className="col-span-1 font-bold text-green-400">{r.totalBuffs || 0}벞</div>
                                     <div className="col-span-2 text-right text-[10px] text-slate-600">{r.date}</div>
+                                    {/* [변경] 관리자일 때만 X 버튼 렌더링 */}
                                     <div className="col-span-1 text-center">
-                                        <button onClick={()=>deleteRanking(idx)} className="text-red-800 hover:text-red-500 font-bold">×</button>
+                                        {isRankAdminMode && <button onClick={()=>deleteRanking(idx)} className="text-red-800 hover:text-red-500 font-bold">×</button>}
                                     </div>
                                 </div>
                             ))}
                             {rankings.length === 0 && <div className="text-center py-10 text-slate-600 font-bold">등록된 데이터가 없습니다.</div>}
                         </div>
                         <div className="p-3 bg-[#111827] rounded-b-2xl border-t border-slate-800 flex justify-between items-center">
-                            <span className="text-[10px] text-slate-600 italic">항목을 더블클릭하면 상세 셋팅을 볼 수 있습니다.</span>
-                            <button onClick={clearRankings} className="text-xs text-red-500 hover:text-red-300 font-bold">전체 삭제 🗑️</button>
+                            {/* [변경] 모드에 따라 하단 안내 문구 변경 */}
+                            <span className="text-[10px] text-slate-600 italic">
+                                {isRankAdminMode ? "항목을 더블클릭하면 상세 셋팅을 볼 수 있습니다." : "상세 셋팅 보기 및 삭제는 관리자만 가능합니다."}
+                            </span>
+                            {/* [변경] 관리자일 때만 전체 삭제 버튼 렌더링 */}
+                            {isRankAdminMode && <button onClick={clearRankings} className="text-xs text-red-500 hover:text-red-300 font-bold">전체 삭제 🗑️</button>}
                         </div>
                     </div>
                 </div>
