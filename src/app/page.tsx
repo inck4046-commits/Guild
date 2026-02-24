@@ -6,7 +6,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 
 // ============================================================================
-// [1] 데이터 및 상수 (오타 및 포맷 완벽 정리)
+// [1] 데이터 및 상수
 // ============================================================================
 const DRAGON_TYPES = ["체", "공", "방", "체공", "체방", "공방", "(진각)체", "(진각)공", "(진각)방", "(진각)체공", "(진각)체방", "(진각)공방"];
 const GRADES = ["7.0", "8.0", "9.0"];
@@ -435,7 +435,7 @@ export default function Home() {
 
     const [rankings, setRankings] = useState([]);
     const [showRankModal, setShowRankModal] = useState(false);
-    const [isRankAdminMode, setIsRankAdminMode] = useState(false); // [추가] 관리자 모드 여부
+    const [isRankAdminMode, setIsRankAdminMode] = useState(false);
     const [selectedRankDetail, setSelectedRankDetail] = useState(null);
 
     useEffect(() => {
@@ -535,13 +535,11 @@ export default function Home() {
         }
     };
 
-    // [추가] 일반 길드원 조회용 모드 열기
     const openViewRankings = () => {
         setIsRankAdminMode(false);
         setShowRankModal(true);
     };
 
-    // [변경] 기존 버튼은 관리자 모드로
     const openAdminRankings = () => {
         const pw = prompt("관리자 비밀번호를 입력하세요.");
         if(pw === "5454") {
@@ -586,7 +584,6 @@ export default function Home() {
                         ← 메인으로
                     </Link>
                     <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">{t('title')}</h1>
-                    {/* [변경] 조회용 버튼과 관리자용 버튼을 따로 분리 */}
                     <div className="flex gap-2">
                         <button onClick={openViewRankings} className="bg-emerald-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-emerald-500 transition shadow-lg">📊 순위표 (조회용)</button>
                         <button onClick={openAdminRankings} className="bg-amber-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-amber-500 transition shadow-lg">⚙️ 관리자</button>
@@ -667,11 +664,9 @@ export default function Home() {
                                 <div className="col-span-1">평균 TAR</div>
                                 <div className="col-span-1">총 벞</div>
                                 <div className="col-span-2 text-right">등록일</div>
-                                {/* [변경] 관리자일 때만 삭제 헤더 표시 */}
                                 <div className="col-span-1 text-center">{isRankAdminMode ? '삭제' : ''}</div>
                             </div>
                             {rankings.map((r, idx) => (
-                                {/* [변경] 관리자일 때만 더블클릭 이벤트(상세보기) 활성화 */}
                                 <div key={idx} onDoubleClick={() => { if(isRankAdminMode) setSelectedRankDetail(r); }} 
                                      className={`grid grid-cols-12 items-center bg-[#111827] p-3 rounded-xl border border-slate-800 transition group text-center text-xs ${isRankAdminMode ? 'cursor-pointer hover:border-indigo-500' : 'cursor-default'}`}>
                                     <div className="col-span-1 font-mono font-bold text-slate-500 group-hover:text-white">{idx+1}</div>
@@ -681,7 +676,6 @@ export default function Home() {
                                     <div className="col-span-1 font-bold text-cyan-400">{r.avgTar ? r.avgTar.toFixed(2) : '0.00'}%</div>
                                     <div className="col-span-1 font-bold text-green-400">{r.totalBuffs || 0}벞</div>
                                     <div className="col-span-2 text-right text-[10px] text-slate-600">{r.date}</div>
-                                    {/* [변경] 관리자일 때만 X 버튼 렌더링 */}
                                     <div className="col-span-1 text-center">
                                         {isRankAdminMode && <button onClick={()=>deleteRanking(idx)} className="text-red-800 hover:text-red-500 font-bold">×</button>}
                                     </div>
@@ -690,11 +684,9 @@ export default function Home() {
                             {rankings.length === 0 && <div className="text-center py-10 text-slate-600 font-bold">등록된 데이터가 없습니다.</div>}
                         </div>
                         <div className="p-3 bg-[#111827] rounded-b-2xl border-t border-slate-800 flex justify-between items-center">
-                            {/* [변경] 모드에 따라 하단 안내 문구 변경 */}
                             <span className="text-[10px] text-slate-600 italic">
                                 {isRankAdminMode ? "항목을 더블클릭하면 상세 셋팅을 볼 수 있습니다." : "상세 셋팅 보기 및 삭제는 관리자만 가능합니다."}
                             </span>
-                            {/* [변경] 관리자일 때만 전체 삭제 버튼 렌더링 */}
                             {isRankAdminMode && <button onClick={clearRankings} className="text-xs text-red-500 hover:text-red-300 font-bold">전체 삭제 🗑️</button>}
                         </div>
                     </div>
